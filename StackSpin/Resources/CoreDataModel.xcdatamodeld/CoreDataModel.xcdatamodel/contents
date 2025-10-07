@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="1" systemVersion="" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
+    <entity name="JobEntity" representedClassName="JobEntity" syncable="YES">
+        <attribute name="id" optional="NO" attributeType="UUIDAttributeType"/>
+        <attribute name="createdAt" optional="NO" attributeType="DateAttributeType"/>
+        <attribute name="state" optional="NO" attributeType="String"/>
+        <attribute name="photoLocalID" optional="NO" attributeType="String"/>
+        <attribute name="barcode" optional="YES" attributeType="String"/>
+        <attribute name="ocrText" optional="YES" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData"/>
+        <attribute name="candidateMBIDs" optional="YES" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData"/>
+        <attribute name="chosenMBID" optional="YES" attributeType="String"/>
+        <attribute name="chosenSpotifyAlbumID" optional="YES" attributeType="String"/>
+        <attribute name="addedTrackIDs" optional="YES" attributeType="Transformable" valueTransformerName="NSSecureUnarchiveFromData"/>
+        <attribute name="errorDescription" optional="YES" attributeType="String"/>
+    </entity>
+    <entity name="AlbumCacheItemEntity" representedClassName="AlbumCacheItemEntity" syncable="YES">
+        <attribute name="mbid" optional="YES" attributeType="String"/>
+        <attribute name="title" optional="YES" attributeType="String"/>
+        <attribute name="artist" optional="YES" attributeType="String"/>
+        <attribute name="year" optional="YES" attributeType="String"/>
+        <attribute name="label" optional="YES" attributeType="String"/>
+        <attribute name="market" optional="YES" attributeType="String"/>
+        <attribute name="coverThumbLocalPath" optional="YES" attributeType="String"/>
+        <attribute name="featurePrintData" optional="YES" attributeType="Binary"/>
+        <attribute name="lastUsedAt" optional="YES" attributeType="DateAttributeType"/>
+    </entity>
+    <entity name="SettingsEntity" representedClassName="SettingsEntity" syncable="YES">
+        <attribute name="id" optional="NO" attributeType="UUIDAttributeType"/>
+        <attribute name="spotifyPlaylistID" optional="YES" attributeType="String"/>
+        <attribute name="market" optional="YES" attributeType="String"/>
+        <attribute name="addEntireAlbum" optional="NO" attributeType="Boolean" defaultValueString="YES"/>
+        <attribute name="featureThreshold" optional="NO" attributeType="Double" defaultValueString="13.5"/>
+    </entity>
+    <entity name="DedupeEntity" representedClassName="DedupeEntity" syncable="YES">
+        <attribute name="playlistID" optional="NO" attributeType="String"/>
+        <attribute name="trackID" optional="NO" attributeType="String"/>
+    </entity>
+</model>
