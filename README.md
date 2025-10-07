@@ -37,6 +37,31 @@ See inline `// TODO(MVP)` comments for remaining work.
    - `NSPhotoLibraryUsageDescription`
 6. Build and run on iOS 17+.
 
+## Building & Running
+
+### Requirements
+
+- Xcode 15 or newer (iOS 17 SDK)
+- A Spotify developer account for client configuration
+- An iOS 17 simulator or device (camera/Photos access is only available on device)
+
+### Steps
+
+1. Clone the repository and open the project in Xcode:
+
+   ```bash
+   git clone <repo-url>
+   cd DiscLib
+   open StackSpin.xcodeproj
+   ```
+
+2. In Xcode, select the **StackSpin** target and paste your Spotify client ID into `Services/Auth/PKCEAuth.swift` (replace the `YOUR_SPOTIFY_CLIENT_ID` placeholder).
+3. Choose an iOS 17 simulator (or a provisioned device) from the scheme selector.
+4. Press **Cmd + B** to build. Fix any signing warnings by selecting your Apple ID/team under *Signing & Capabilities* if you plan to run on device.
+5. Press **Cmd + R** to launch the app. On first launch you will be prompted to sign into Spotify and pick the playlist that StackSpin should append to.
+
+> Tip: you can also build from the command line with `xcodebuild -scheme StackSpin -destination 'platform=iOS Simulator,name=iPhone 15' build` once Xcode command line tools are installed.
+
 ## Testing Notes
 
 - Use the sample UPCs in `TestData.swift` for quick verifications.
