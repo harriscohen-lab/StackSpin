@@ -22,6 +22,7 @@ struct StackSpinApp: App {
                 .environment(\.spotifyAuth, auth)
                 .environment(\.settingsStore, settings)
                 .environment(\.persistence, persistence)
+                .environmentObject(auth)
                 .environmentObject(jobRunner)
                 .task {
                     await auth.restoreIfPossible()

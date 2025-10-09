@@ -16,7 +16,7 @@ final class FeaturePrintMatcher {
         guard let queryObservation = request.results?.first else { return nil }
 
         let context = persistence.container.viewContext
-        let fetch = NSFetchRequest<AlbumCacheItemEntity>(entityName: "AlbumCacheItem")
+        let fetch: NSFetchRequest<AlbumCacheItemEntity> = AlbumCacheItemEntity.fetchRequest()
         let items = try context.fetch(fetch)
         var best: (String, Float)?
         for item in items {

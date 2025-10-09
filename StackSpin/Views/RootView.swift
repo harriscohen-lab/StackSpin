@@ -1,7 +1,7 @@
 import SwiftUI
 
 struct RootView: View {
-    @Environment(\.spotifyAuth) private var spotifyAuth
+    @EnvironmentObject private var spotifyAuth: SpotifyAuthController
     @EnvironmentObject private var jobRunner: JobRunner
     @Environment(\.settingsStore) private var settingsStore
 
