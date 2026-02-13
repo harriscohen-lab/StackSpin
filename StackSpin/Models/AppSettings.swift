@@ -1,5 +1,6 @@
 import Foundation
 import Combine
+import SwiftUI
 
 struct AppSettings: Identifiable, Codable {
     let id: UUID
