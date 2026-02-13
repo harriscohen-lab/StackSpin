@@ -39,7 +39,6 @@ objects = {
 5A1D479F2A4E3D1200A1C0A1 /* TestData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1D47672A4E3D1200A1C0A1 /* TestData.swift */; };
 5A1D47A02A4E3D1200A1C0A1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5A1D47682A4E3D1200A1C0A1 /* Assets.xcassets */; };
 5A1D47A12A4E3D1200A1C0A1 /* CoreDataModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 5A1D47692A4E3D1200A1C0A1 /* CoreDataModel.xcdatamodeld */; };
-5A1D47A22A4E3D1200A1C0A1 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5A1D476A2A4E3D1200A1C0A1 /* Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -312,7 +311,6 @@ isa = PBXResourcesBuildPhase;
 buildActionMask = 2147483647;
 files = (
 5A1D47A02A4E3D1200A1C0A1 /* Assets.xcassets in Resources */,
-5A1D47A22A4E3D1200A1C0A1 /* Info.plist in Resources */,
 );
 runOnlyForDeploymentPostprocessing = 0;
 };
