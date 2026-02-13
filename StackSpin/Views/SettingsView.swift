@@ -19,11 +19,11 @@ struct SettingsView: View {
             Section("Preferences") {
                 Toggle("Add entire album", isOn: Binding(
                     get: { settingsStore.settings.addEntireAlbum },
-                    set: { settingsStore.update { $0.addEntireAlbum = $1 } }
+                    set: { newValue in settingsStore.update { $0.addEntireAlbum = newValue } }
                 ))
                 Picker("Market", selection: Binding(
                     get: { settingsStore.settings.market },
-                    set: { settingsStore.update { $0.market = $1 } }
+                    set: { newValue in settingsStore.update { $0.market = newValue } }
                 )) {
                     ForEach(["US", "GB", "DE", "FR", "JP"], id: \.self) { region in
                         Text(region)
@@ -33,7 +33,7 @@ struct SettingsView: View {
                     Text("Image match threshold")
                     Slider(value: Binding(
                         get: { settingsStore.settings.featureThreshold },
-                        set: { settingsStore.update { $0.featureThreshold = $1 } }
+                        set: { newValue in settingsStore.update { $0.featureThreshold = newValue } }
                     ), in: 5...25)
                 }
             }
