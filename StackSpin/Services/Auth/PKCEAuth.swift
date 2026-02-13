@@ -225,4 +225,3 @@ private extension Data {
             .replacingOccurrences(of: "=", with: "")
     }
 }
-EOF
