@@ -65,8 +65,8 @@ final class AppSettingsStore: ObservableObject {
         let context = persistence.container.viewContext
         let request = NSFetchRequest<SettingsEntity>(entityName: "SettingsEntity")
         request.fetchLimit = 1
-        guard let entity = try? context.fetch(request).first else { return nil }
-        guard let entity else { return nil }
+        guard let results = try? context.fetch(request),
+              let entity = results.first else { return nil }
         return AppSettings(
             id: entity.id,
             spotifyPlaylistID: entity.spotifyPlaylistID,
