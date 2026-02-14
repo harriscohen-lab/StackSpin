@@ -35,22 +35,32 @@ final class Resolver {
         }
         if job.ocrText.isEmpty {
             if let image = loadImage(job.photoLocalID), let cgImage = image.cgImage {
-                let text = try await ocr.extractText(from: cgImage)
-                job.ocrText = text
+                do {
+                    let text = try await ocr.extractText(from: cgImage)
+                    job.ocrText = text
+                } catch {
+                    NSLog("OCR extraction failed, continuing without OCR text: \(error)")
+                }
             }
         }
         let parsed = OCRHeuristics.parseCandidate(from: job.ocrText)
         if try await resolveViaText(&job, parsed: parsed, settings: settings) {
             return
         }
-        if let image = loadImage(job.photoLocalID), let cgImage = image.cgImage,
-           let best = try await featureMatcher.nearestNeighborDistance(query: cgImage),
-           best.distance < Float(settings.featureThreshold) {
-            job.chosenMBID = best.mbid
-            job.state = .needsConfirm
-        } else {
-            throw AppError.network("No confident match")
+        if let image = loadImage(job.photoLocalID), let cgImage = image.cgImage {
+            do {
+                if let best = try await featureMatcher.nearestNeighborDistance(query: cgImage),
+                   best.distance < Float(settings.featureThreshold) {
+                    job.chosenMBID = best.mbid
+                    job.state = .needsConfirm
+                    return
+                }
+            } catch {
+                NSLog("Feature print matching failed, continuing without cache match: \(error)")
+            }
         }
+
+        throw AppError.network("No confident match")
     }
 
     private func resolveViaBarcode(_ job: inout Job, barcode: String, market: String) async throws -> Bool {
