@@ -10,6 +10,9 @@ final class FeaturePrintMatcher {
     }
 
     func nearestNeighborDistance(query: CGImage) async throws -> (mbid: String, distance: Float)? {
+        #if targetEnvironment(simulator)
+        return nil
+        #else
         let request = VNGenerateImageFeaturePrintRequest()
         let handler = VNImageRequestHandler(cgImage: query, options: [:])
         try handler.perform([request])
@@ -34,9 +37,13 @@ final class FeaturePrintMatcher {
             }
         }
         return best
+        #endif
     }
 
     func storeFeaturePrint(_ image: CGImage, mbid: String) async {
+        #if targetEnvironment(simulator)
+        return
+        #else
         let request = VNGenerateImageFeaturePrintRequest()
         let handler = VNImageRequestHandler(cgImage: image, options: [:])
         do {
@@ -57,6 +64,7 @@ final class FeaturePrintMatcher {
         } catch {
             NSLog("Feature print store error: \(error)")
         }
+        #endif
     }
 
     private func encodeFeaturePrintObservation(_ observation: VNFeaturePrintObservation) -> Data? {
