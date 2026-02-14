@@ -2,6 +2,10 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.stackspin.process</string>
+	</array>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleExecutable</key>
@@ -18,8 +22,20 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>spotify</string>
+	</array>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>StackSpin needs access to the camera to capture album artwork.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>StackSpin saves processed album thumbnails locally.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>StackSpin imports album photos from your library for matching.</string>
+	<key>SpotifyClientID</key>
+	<string>01d0dfbbe85d428382cf766b80f0326d</string>
 	<key>UILaunchScreen</key>
 	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
@@ -33,22 +49,6 @@
 	<key>UISupportedInterfaceOrientations~ipad</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
-	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>StackSpin needs access to the camera to capture album artwork.</string>
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>StackSpin imports album photos from your library for matching.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>StackSpin saves processed album thumbnails locally.</string>
-	<key>BGTaskSchedulerPermittedIdentifiers</key>
-	<array>
-		<string>com.stackspin.process</string>
-	</array>
-	<key>SpotifyClientID</key>
-	<string>YOUR_SPOTIFY_CLIENT_ID</string>
-	<key>LSApplicationQueriesSchemes</key>
-	<array>
-		<string>spotify</string>
 	</array>
 </dict>
 </plist>
