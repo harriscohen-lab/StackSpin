@@ -70,9 +70,7 @@ final class FeaturePrintMatcher {
 
     private func decodeFeaturePrintObservation(from data: Data) -> VNFeaturePrintObservation? {
         do {
-            let allowedClasses: [AnyClass] = [VNFeaturePrintObservation.self]
-            return try NSKeyedUnarchiver
-                .unarchivedObject(ofClasses: allowedClasses, from: data) as? VNFeaturePrintObservation
+            return try NSKeyedUnarchiver.unarchivedObject(ofClass: VNFeaturePrintObservation.self, from: data)
         } catch {
             NSLog("Feature print decode error: \(error)")
             return nil
