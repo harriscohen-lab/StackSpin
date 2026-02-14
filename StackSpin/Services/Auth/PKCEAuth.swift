@@ -14,9 +14,14 @@ struct SpotifyTokens: Codable {
 final class SpotifyAuthController: NSObject, ObservableObject {
     @Published private(set) var tokens: SpotifyTokens?
     private var currentSession: ASWebAuthenticationSession?
-    private let clientID = "01d0dfbbe85d428382cf766b80f0326d" // TODO: Move to config
+    private let clientID: String
     private let redirectURI = URL(string: "stackspin://auth")!
     private let keychain = KeychainHelper()
+
+    override init() {
+        self.clientID = Bundle.main.object(forInfoDictionaryKey: "SpotifyClientID") as? String ?? ""
+        super.init()
+    }
 
     func isAuthorized() -> Bool {
         guard let tokens else { return false }
@@ -25,6 +30,8 @@ final class SpotifyAuthController: NSObject, ObservableObject {
 
     @MainActor
     func signIn() async throws {
+        guard !clientID.isEmpty else { throw AppError.spotifyAuth }
+
         let verifier = CodeVerifier()
         let challenge = verifier.challenge
         let state = UUID().uuidString

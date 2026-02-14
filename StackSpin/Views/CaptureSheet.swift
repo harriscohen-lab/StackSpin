@@ -2,6 +2,7 @@ import SwiftUI
 import UIKit
 
 struct CaptureSheet: View {
+    @Environment(\.dismiss) private var dismiss
     var onCapture: (UIImage) -> Void
 
     var body: some View {
@@ -9,7 +10,7 @@ struct CaptureSheet: View {
             Text("Capture not yet implemented")
                 .foregroundStyle(.secondary)
             MonoButton(title: "Close") {
-                // TODO(MVP): Hook up camera workflow
+                dismiss()
             }
         }
         .padding()
