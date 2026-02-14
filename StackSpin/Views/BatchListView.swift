@@ -42,7 +42,7 @@ struct BatchListView: View {
             .padding()
             .navigationTitle("Batch")
         }
-        .onChange(of: selectedPhotos) { newItems in
+        .onChange(of: selectedPhotos) { _, newItems in
             Task { await handleSelection(newItems) }
         }
     }
