@@ -14,7 +14,7 @@ struct SpotifyTokens: Codable {
 final class SpotifyAuthController: NSObject, ObservableObject {
     @Published private(set) var tokens: SpotifyTokens?
     private var currentSession: ASWebAuthenticationSession?
-    private let clientID = "YOUR_SPOTIFY_CLIENT_ID" // TODO: Move to config
+    private let clientID = "01d0dfbbe85d428382cf766b80f0326d" // TODO: Move to config
     private let redirectURI = URL(string: "stackspin://auth")!
     private let keychain = KeychainHelper()
 
