@@ -2,13 +2,16 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.settingsStore) private var settingsStore
-    @Environment(\.spotifyAuth) private var spotifyAuth
+
+    @State private var isShowingPlaylistPrompt = false
+    @State private var playlistInput = ""
 
     var body: some View {
         Form {
             Section("Spotify") {
                 MonoButton(title: "Choose Playlist") {
-                    // TODO(MVP): Implement playlist picker
+                    playlistInput = settingsStore.settings.spotifyPlaylistID ?? ""
+                    isShowingPlaylistPrompt = true
                 }
                 if let id = settingsStore.settings.spotifyPlaylistID {
                     Text("Selected: \(id)")
@@ -39,5 +42,15 @@ struct SettingsView: View {
             }
         }
         .navigationTitle("Settings")
+        .alert("Choose Playlist", isPresented: $isShowingPlaylistPrompt) {
+            TextField("Spotify playlist ID", text: $playlistInput)
+            Button("Save") {
+                let trimmed = playlistInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                settingsStore.update { $0.spotifyPlaylistID = trimmed.isEmpty ? nil : trimmed }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Paste a Spotify playlist ID (for example, from spotify:playlist:<id> or open.spotify.com/playlist/<id>).")
+        }
     }
 }
