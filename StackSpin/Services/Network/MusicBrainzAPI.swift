@@ -96,7 +96,7 @@ private struct MBSearchResponse: Decodable {
 
         func toModel() -> MBRelease {
             let artistName = artistCredit.first?.artist?.name ?? artistCredit.first?.name ?? ""
-            let labelName = labelInfo?.first?.label??.name
+            let labelName = labelInfo?.first?.label?.name
             return MBRelease(
                 id: id,
                 title: title,

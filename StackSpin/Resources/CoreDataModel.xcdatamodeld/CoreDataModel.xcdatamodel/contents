@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <model type="com.apple.IDECoreDataModeler.DataModel" documentVersion="1.0" lastSavedToolsVersion="1" systemVersion="" minimumToolsVersion="Automatic" sourceLanguage="Swift" userDefinedModelVersionIdentifier="">
     <entity name="JobEntity" representedClassName="JobEntity" syncable="YES">
-        <attribute name="id" optional="NO" attributeType="UUIDAttributeType"/>
-        <attribute name="createdAt" optional="NO" attributeType="DateAttributeType"/>
+        <attribute name="id" optional="NO" attributeType="UUID"/>
+        <attribute name="createdAt" optional="NO" attributeType="Date"/>
         <attribute name="state" optional="NO" attributeType="String"/>
         <attribute name="photoLocalID" optional="NO" attributeType="String"/>
         <attribute name="barcode" optional="YES" attributeType="String"/>
@@ -22,10 +22,10 @@
         <attribute name="market" optional="YES" attributeType="String"/>
         <attribute name="coverThumbLocalPath" optional="YES" attributeType="String"/>
         <attribute name="featurePrintData" optional="YES" attributeType="Binary"/>
-        <attribute name="lastUsedAt" optional="YES" attributeType="DateAttributeType"/>
+        <attribute name="lastUsedAt" optional="YES" attributeType="Date"/>
     </entity>
     <entity name="SettingsEntity" representedClassName="SettingsEntity" syncable="YES">
-        <attribute name="id" optional="NO" attributeType="UUIDAttributeType"/>
+        <attribute name="id" optional="NO" attributeType="UUID"/>
         <attribute name="spotifyPlaylistID" optional="YES" attributeType="String"/>
         <attribute name="market" optional="YES" attributeType="String"/>
         <attribute name="addEntireAlbum" optional="NO" attributeType="Boolean" defaultValueString="YES"/>

@@ -39,7 +39,6 @@ objects = {
 5A1D479F2A4E3D1200A1C0A1 /* TestData.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5A1D47672A4E3D1200A1C0A1 /* TestData.swift */; };
 5A1D47A02A4E3D1200A1C0A1 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 5A1D47682A4E3D1200A1C0A1 /* Assets.xcassets */; };
 5A1D47A12A4E3D1200A1C0A1 /* CoreDataModel.xcdatamodeld in Sources */ = {isa = PBXBuildFile; fileRef = 5A1D47692A4E3D1200A1C0A1 /* CoreDataModel.xcdatamodeld */; };
-5A1D47A22A4E3D1200A1C0A1 /* Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 5A1D476A2A4E3D1200A1C0A1 /* Info.plist */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -75,7 +74,6 @@ objects = {
 5A1D47662A4E3D1200A1C0A1 /* StatusBadge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusBadge.swift; sourceTree = "<group>"; };
 5A1D47672A4E3D1200A1C0A1 /* TestData.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TestData.swift; sourceTree = "<group>"; };
 5A1D47682A4E3D1200A1C0A1 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
-5A1D476A2A4E3D1200A1C0A1 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 5A1D47B22A4E3D1200A1C0A1 /* CoreDataModel.xcdatamodel */ = {isa = PBXFileReference; lastKnownFileType = wrapper.xcdatamodel; path = CoreDataModel.xcdatamodel; sourceTree = "<group>"; };
 5A1D47B32A4E3D1200A1C0A1 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -170,7 +168,6 @@ sourceTree = "<group>";
 5A1D47792A4E3D1200A1C0A1 /* Supporting */ = {
 isa = PBXGroup;
 children = (
-5A1D476A2A4E3D1200A1C0A1 /* Info.plist */,
 );
 path = Supporting;
 sourceTree = "<group>";
@@ -312,7 +309,6 @@ isa = PBXResourcesBuildPhase;
 buildActionMask = 2147483647;
 files = (
 5A1D47A02A4E3D1200A1C0A1 /* Assets.xcassets in Resources */,
-5A1D47A22A4E3D1200A1C0A1 /* Info.plist in Resources */,
 );
 runOnlyForDeploymentPostprocessing = 0;
 };
