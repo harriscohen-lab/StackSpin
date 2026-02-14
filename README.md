@@ -21,13 +21,12 @@ StackSpin/
   Resources/
 ```
 
-See inline `// TODO(MVP)` comments for remaining work.
 
 ## Setup
 
 1. Create a Spotify application at <https://developer.spotify.com/dashboard>.
    - Add a redirect URI matching `stackspin://auth` (update `PKCEAuth.swift` if you change it).
-   - Copy the client ID into `PKCEAuth.swift`.
+   - Copy the client ID into `Supporting/Info.plist` under the `SpotifyClientID` key.
 2. Enable Background Modes in the Xcode project for `Background fetch` and `Background processing`.
 3. Register the background processing identifier `com.stackspin.process` in `Info.plist` under `BGTaskSchedulerPermittedIdentifiers`.
 4. Add the `Resources/CoreDataModel.xcdatamodeld` to the Xcode project.
@@ -55,7 +54,7 @@ See inline `// TODO(MVP)` comments for remaining work.
    open StackSpin.xcodeproj
    ```
 
-2. In Xcode, select the **StackSpin** target and paste your Spotify client ID into `Services/Auth/PKCEAuth.swift` (replace the `YOUR_SPOTIFY_CLIENT_ID` placeholder).
+2. In Xcode, select the **StackSpin** target and set your Spotify client ID in `Supporting/Info.plist` by replacing the `YOUR_SPOTIFY_CLIENT_ID` value for `SpotifyClientID`.
 3. Choose an iOS 17 simulator (or a provisioned device) from the scheme selector.
 4. Press **Cmd + B** to build. Fix any signing warnings by selecting your Apple ID/team under *Signing & Capabilities* if you plan to run on device.
 5. Press **Cmd + R** to launch the app. On first launch you will be prompted to sign into Spotify and pick the playlist that StackSpin should append to.

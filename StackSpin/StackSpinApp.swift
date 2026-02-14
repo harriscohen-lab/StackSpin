@@ -12,7 +12,7 @@ struct StackSpinApp: App {
         let auth = SpotifyAuthController()
         _persistence = StateObject(wrappedValue: persistence)
         _auth = StateObject(wrappedValue: auth)
-        _settings = StateObject(wrappedValue: AppSettingsStore())
+        _settings = StateObject(wrappedValue: AppSettingsStore(persistence: persistence))
         _jobRunner = StateObject(wrappedValue: JobRunner(authController: auth, persistence: persistence))
     }
 

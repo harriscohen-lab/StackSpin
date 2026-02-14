@@ -3,6 +3,7 @@ import Foundation
 
 final class BackgroundScheduler {
     private let taskIdentifier = "com.stackspin.process"
+    var onProcessRequested: (@Sendable () async -> Bool)?
 
     init() {
         BGTaskScheduler.shared.register(forTaskWithIdentifier: taskIdentifier, using: nil) { task in
@@ -25,7 +26,9 @@ final class BackgroundScheduler {
         task.expirationHandler = {
             task.setTaskCompleted(success: false)
         }
-        // TODO(MVP): Kick off background job processing and call setTaskCompleted
-        task.setTaskCompleted(success: true)
+        Task {
+            let success = await onProcessRequested?() ?? true
+            task.setTaskCompleted(success: success)
+        }
     }
 }
