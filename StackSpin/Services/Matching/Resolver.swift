@@ -64,31 +64,48 @@ final class Resolver {
     }
 
     private func resolveViaBarcode(_ job: inout Job, barcode: String, market: String) async throws -> Bool {
-        let releases = try await musicBrainz.releaseByBarcode(barcode)
-        if !releases.isEmpty {
-            let match = releases.first!
-            try await enrichJob(&job, with: match, market: market)
-            return true
-        }
-        do {
-            let discogsReleases = try await discogs.searchByBarcode(barcode)
-            if let first = discogsReleases.first {
-                let release = MBRelease(
-                    id: String(first.id),
-                    title: first.title,
-                    artistCredit: first.artist,
-                    date: first.year.map { String($0) },
-                    label: first.label,
-                    barcode: first.barcode,
-                    country: nil
-                )
-                try await enrichJob(&job, with: release, market: market)
+        for candidate in barcodeCandidates(from: barcode) {
+            let releases = try await musicBrainz.releaseByBarcode(candidate)
+            if !releases.isEmpty {
+                let match = releases.first!
+                try await enrichJob(&job, with: match, market: market)
                 return true
             }
-        } catch {
-            NSLog("Discogs fallback error: \(error)")
+            do {
+                let discogsReleases = try await discogs.searchByBarcode(candidate)
+                if let first = discogsReleases.first {
+                    let release = MBRelease(
+                        id: String(first.id),
+                        title: first.title,
+                        artistCredit: first.artist,
+                        date: first.year.map { String($0) },
+                        label: first.label,
+                        barcode: first.barcode,
+                        country: nil
+                    )
+                    try await enrichJob(&job, with: release, market: market)
+                    return true
+                }
+            } catch {
+                NSLog("Discogs fallback error: \(error)")
+            }
         }
         return false
+    }
+
+    private func barcodeCandidates(from barcode: String) -> [String] {
+        let digitsOnly = barcode.filter(\.isNumber)
+        guard !digitsOnly.isEmpty else {
+            return [barcode]
+        }
+
+        var candidates: [String] = [digitsOnly]
+        if digitsOnly.count == 12 {
+            candidates.append("0\(digitsOnly)")
+        } else if digitsOnly.count == 13, digitsOnly.first == "0" {
+            candidates.append(String(digitsOnly.dropFirst()))
+        }
+        return Array(NSOrderedSet(array: candidates)) as? [String] ?? candidates
     }
 
     private func resolveViaText(_ job: inout Job, parsed: (artist: String?, album: String?, catno: String?), settings: AppSettings) async throws -> Bool {
