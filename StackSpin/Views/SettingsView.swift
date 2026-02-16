@@ -45,8 +45,8 @@ struct SettingsView: View {
         .alert("Choose Playlist", isPresented: $isShowingPlaylistPrompt) {
             TextField("Spotify playlist ID", text: $playlistInput)
             Button("Save") {
-                let trimmed = playlistInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                settingsStore.update { $0.spotifyPlaylistID = trimmed.isEmpty ? nil : trimmed }
+                let normalized = AppSettings.normalizedPlaylistID(from: playlistInput)
+                settingsStore.update { $0.spotifyPlaylistID = normalized }
             }
             Button("Cancel", role: .cancel) {}
         } message: {

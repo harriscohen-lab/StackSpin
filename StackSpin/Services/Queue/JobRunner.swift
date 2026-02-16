@@ -58,7 +58,8 @@ final class JobRunner: ObservableObject {
         do {
             job.state = .matching
             try await resolver.resolve(job: &job, settings: settings)
-            if let playlist = settings.spotifyPlaylistID, let albumID = job.chosenSpotifyAlbumID {
+            if let playlist = AppSettings.normalizedPlaylistID(from: settings.spotifyPlaylistID),
+               let albumID = job.chosenSpotifyAlbumID {
                 let tracks = try await spotifyAPI.albumTracks(albumID: albumID)
                 let newURIs = tracks.map { $0.uri }.filter { dedupeSet.insert($0).inserted }
                 try await spotifyAPI.addTracks(playlistID: playlist, trackURIs: newURIs)
