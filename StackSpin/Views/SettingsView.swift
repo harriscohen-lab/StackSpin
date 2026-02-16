@@ -2,9 +2,12 @@ import SwiftUI
 
 struct SettingsView: View {
     @Environment(\.settingsStore) private var settingsStore
+    @Environment(\.spotifyAuth) private var spotifyAuth
 
     @State private var isShowingPlaylistPrompt = false
     @State private var playlistInput = ""
+    @State private var isReauthenticating = false
+    @State private var spotifyMessage: String?
 
     var body: some View {
         Form {
@@ -13,8 +16,19 @@ struct SettingsView: View {
                     playlistInput = settingsStore.settings.spotifyPlaylistID ?? ""
                     isShowingPlaylistPrompt = true
                 }
+                MonoButton(title: isReauthenticating ? "Reconnecting Spotify…" : "Reconnect Spotify") {
+                    reconnectSpotify()
+                }
+                .disabled(isReauthenticating)
+
                 if let id = settingsStore.settings.spotifyPlaylistID {
                     Text("Selected: \(id)")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                }
+
+                if let spotifyMessage {
+                    Text(spotifyMessage)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
@@ -45,12 +59,26 @@ struct SettingsView: View {
         .alert("Choose Playlist", isPresented: $isShowingPlaylistPrompt) {
             TextField("Spotify playlist ID", text: $playlistInput)
             Button("Save") {
-                let trimmed = playlistInput.trimmingCharacters(in: .whitespacesAndNewlines)
-                settingsStore.update { $0.spotifyPlaylistID = trimmed.isEmpty ? nil : trimmed }
+                let normalized = AppSettings.normalizedPlaylistID(from: playlistInput)
+                settingsStore.update { $0.spotifyPlaylistID = normalized }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Paste a Spotify playlist ID (for example, from spotify:playlist:<id> or open.spotify.com/playlist/<id>).")
+        }
+    }
+
+    private func reconnectSpotify() {
+        Task {
+            isReauthenticating = true
+            spotifyMessage = nil
+            do {
+                try await spotifyAuth.signIn()
+                spotifyMessage = "Spotify account reconnected."
+            } catch {
+                spotifyMessage = error.localizedDescription
+            }
+            isReauthenticating = false
         }
     }
 }

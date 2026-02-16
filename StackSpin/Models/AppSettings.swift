@@ -25,6 +25,31 @@ struct AppSettings: Identifiable, Codable {
     }
 }
 
+extension AppSettings {
+    static func normalizedPlaylistID(from rawValue: String?) -> String? {
+        guard let rawValue else { return nil }
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        if let range = trimmed.range(of: "spotify:playlist:", options: .caseInsensitive) {
+            let value = String(trimmed[range.upperBound...])
+            return value.split(separator: "?").first.map(String.init) ?? value
+        }
+
+        if let url = URL(string: trimmed),
+           let host = url.host?.lowercased(),
+           host.contains("spotify.com") {
+            let pathParts = url.pathComponents.filter { $0 != "/" }
+            if let playlistIndex = pathParts.firstIndex(where: { $0.lowercased() == "playlist" }),
+               playlistIndex + 1 < pathParts.count {
+                return pathParts[playlistIndex + 1]
+            }
+        }
+
+        return trimmed
+    }
+}
+
 final class AppSettingsStore: ObservableObject {
     @Published var settings: AppSettings
     private let persistence: Persistence
@@ -54,7 +79,7 @@ final class AppSettingsStore: ObservableObject {
         request.fetchLimit = 1
         let entity = (try? context.fetch(request))?.first ?? SettingsEntity(context: context)
         entity.id = settings.id
-        entity.spotifyPlaylistID = settings.spotifyPlaylistID
+        entity.spotifyPlaylistID = AppSettings.normalizedPlaylistID(from: settings.spotifyPlaylistID)
         entity.market = settings.market
         entity.addEntireAlbum = settings.addEntireAlbum
         entity.featureThreshold = settings.featureThreshold
@@ -69,7 +94,7 @@ final class AppSettingsStore: ObservableObject {
               let entity = results.first else { return nil }
         return AppSettings(
             id: entity.id,
-            spotifyPlaylistID: entity.spotifyPlaylistID,
+            spotifyPlaylistID: AppSettings.normalizedPlaylistID(from: entity.spotifyPlaylistID),
             market: entity.market ?? Locale.current.region?.identifier ?? "US",
             addEntireAlbum: entity.addEntireAlbum,
             featureThreshold: entity.featureThreshold
