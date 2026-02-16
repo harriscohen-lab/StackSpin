@@ -88,7 +88,7 @@ final class SpotifyAPI {
                     let message = String(data: data, encoding: .utf8) ?? "Unknown error"
                     if http.statusCode == 403 {
                         throw AppError.network(
-                            "Spotify add tracks failed (403 Forbidden). Signed in as @\(try await currentUserProfile(token: token).id). Make sure that account owns playlist \(playlistID) or the playlist is collaborative. Response: \(message)"
+                            "Spotify add tracks failed (403 Forbidden). Make sure the selected playlist belongs to the signed-in account or is collaborative, then reconnect Spotify and try again. Response: \(message)"
                         )
                     }
                     throw AppError.network("Spotify add tracks failed: \(message)")
