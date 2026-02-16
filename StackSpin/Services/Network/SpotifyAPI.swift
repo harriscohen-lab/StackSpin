@@ -60,6 +60,8 @@ final class SpotifyAPI {
     func addTracks(playlistID: String, trackURIs: [String]) async throws {
         guard !trackURIs.isEmpty else { return }
         let token = try await authController.withValidToken()
+        try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
+
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
         }
@@ -76,7 +78,9 @@ final class SpotifyAPI {
                 guard let http = response as? HTTPURLResponse else {
                     throw AppError.network("Spotify add tracks failed")
                 }
-                if http.statusCode == 429, let retryAfter = http.value(forHTTPHeaderField: "Retry-After"), let delay = Double(retryAfter) {
+                if http.statusCode == 429,
+                   let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
+                   let delay = Double(retryAfter) {
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
@@ -93,8 +97,44 @@ final class SpotifyAPI {
             }
         }
     }
-}
 
+    private func validatePlaylistWriteAccess(playlistID: String, token: String) async throws {
+        let profile = try await currentUserProfile(token: token)
+        let playlist = try await playlistMetadata(playlistID: playlistID, token: token)
+
+        guard playlist.isWritable(byUserID: profile.id) else {
+            throw AppError.network(
+                "Spotify playlist is not writable by the current account. Signed in as @\(profile.id), playlist owner is @\(playlist.owner.id). Select a playlist you own or a collaborative playlist."
+            )
+        }
+    }
+
+    private func currentUserProfile(token: String) async throws -> SpotifyCurrentUser {
+        var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me")!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw AppError.network("Spotify profile fetch failed: \(message)")
+        }
+        return try JSONDecoder().decode(SpotifyCurrentUser.self, from: data)
+    }
+
+    private func playlistMetadata(playlistID: String, token: String) async throws -> SpotifyPlaylistMetadata {
+        var components = URLComponents(string: "https://api.spotify.com/v1/playlists/\(playlistID)")!
+        components.queryItems = [
+            URLQueryItem(name: "fields", value: "id,collaborative,owner(id)")
+        ]
+        var request = URLRequest(url: components.url!)
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+            throw AppError.network("Spotify playlist lookup failed: \(message)")
+        }
+        return try JSONDecoder().decode(SpotifyPlaylistMetadata.self, from: data)
+    }
+}
 
 private struct SpotifySearchResponse: Decodable {
     struct Albums: Decodable {
@@ -114,6 +154,24 @@ private struct SpotifySearchResponse: Decodable {
         let items: [Album]
     }
     let albums: Albums
+}
+
+private struct SpotifyCurrentUser: Decodable {
+    let id: String
+}
+
+private struct SpotifyPlaylistMetadata: Decodable {
+    struct Owner: Decodable {
+        let id: String
+    }
+
+    let id: String
+    let collaborative: Bool
+    let owner: Owner
+
+    func isWritable(byUserID userID: String) -> Bool {
+        collaborative || owner.id == userID
+    }
 }
 
 private struct SpotifyTracksResponse: Decodable {
