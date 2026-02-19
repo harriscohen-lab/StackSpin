@@ -1,15 +1,29 @@
 import CoreData
 import Foundation
+import Network
 import UIKit
 import Photos
 
 final class Resolver {
+    private struct SpotifyFailureRecord {
+        let reason: String
+        let timestamp: Date
+        let connectivityGeneration: UInt64
+    }
+
     private let musicBrainz: MusicBrainzAPI
     private let discogs: DiscogsAPI
     private let spotify: SpotifyAPI
     private let ocr: OCRService
     private let featureMatcher: FeaturePrintMatcher
     private let persistence: Persistence
+    private let spotifyFailureWindow: TimeInterval = 90
+    private let monitorQueue = DispatchQueue(label: "Resolver.PathMonitor")
+    private let stateQueue = DispatchQueue(label: "Resolver.State")
+    private let pathMonitor = NWPathMonitor()
+    private var connectivityGeneration: UInt64 = 0
+    private var lastPathStatus: NWPath.Status?
+    private var spotifyFailuresByBarcode: [String: SpotifyFailureRecord] = [:]
 
     init(
         musicBrainz: MusicBrainzAPI,
@@ -25,6 +39,21 @@ final class Resolver {
         self.ocr = ocr
         self.featureMatcher = featureMatcher
         self.persistence = persistence
+
+        pathMonitor.pathUpdateHandler = { [weak self] path in
+            guard let self else { return }
+            self.stateQueue.async {
+                if self.lastPathStatus != path.status {
+                    self.connectivityGeneration += 1
+                    self.lastPathStatus = path.status
+                }
+            }
+        }
+        pathMonitor.start(queue: monitorQueue)
+    }
+
+    deinit {
+        pathMonitor.cancel()
     }
 
     func resolve(job: inout Job, settings: AppSettings) async throws {
@@ -65,11 +94,23 @@ final class Resolver {
 
     private func resolveViaBarcode(_ job: inout Job, barcode: String, market: String) async throws -> Bool {
         for candidate in barcodeCandidates(from: barcode) {
+            if let suppressReason = shouldSuppressSpotifyRetry(for: candidate) {
+                job.errorDescription = suppressReason
+                continue
+            }
+
             let releases = try await musicBrainz.releaseByBarcode(candidate)
             if !releases.isEmpty {
                 let match = releases.first!
-                try await enrichJob(&job, with: match, market: market)
-                return true
+                do {
+                    try await enrichJob(&job, with: match, market: market, barcodeCandidate: candidate)
+                    return true
+                } catch {
+                    if recordSpotifyFailureIfNeeded(error, barcodeCandidate: candidate, job: &job) {
+                        continue
+                    }
+                    throw error
+                }
             }
             let discogsReleases: [DiscogsRelease]
             do {
@@ -90,9 +131,12 @@ final class Resolver {
                     country: nil
                 )
                 do {
-                    try await enrichJob(&job, with: release, market: market)
+                    try await enrichJob(&job, with: release, market: market, barcodeCandidate: candidate)
                     return true
                 } catch {
+                    if recordSpotifyFailureIfNeeded(error, barcodeCandidate: candidate, job: &job) {
+                        continue
+                    }
                     NSLog("Discogs release enrichment failed for candidate \(candidate): \(error)")
                     throw error
                 }
@@ -140,10 +184,19 @@ final class Resolver {
         }
     }
 
-    private func enrichJob(_ job: inout Job, with release: MBRelease, market: String) async throws {
+    private func enrichJob(_ job: inout Job, with release: MBRelease, market: String, barcodeCandidate: String? = nil) async throws {
+        if let barcodeCandidate, let suppressReason = shouldSuppressSpotifyRetry(for: barcodeCandidate) {
+            job.errorDescription = suppressReason
+            throw AppError.network(suppressReason)
+        }
+
         let album = try await spotify.searchAlbum(artist: release.artistCredit, title: release.title, market: market)
         guard let album else {
-            throw AppError.network("Spotify album not found")
+            let message = "Spotify album not found"
+            if let barcodeCandidate {
+                recordSpotifyFailure(reason: message, barcodeCandidate: barcodeCandidate, job: &job)
+            }
+            throw AppError.network(message)
         }
         job.chosenMBID = release.id
         job.chosenSpotifyAlbumID = album.id
@@ -151,6 +204,51 @@ final class Resolver {
         if let image = loadImage(job.photoLocalID), let cgImage = image.cgImage {
             await featureMatcher.storeFeaturePrint(cgImage, mbid: release.id)
         }
+    }
+
+    private func shouldSuppressSpotifyRetry(for barcodeCandidate: String) -> String? {
+        stateQueue.sync {
+            guard let failure = spotifyFailuresByBarcode[barcodeCandidate] else { return nil }
+            let age = Date().timeIntervalSince(failure.timestamp)
+            guard age <= spotifyFailureWindow,
+                  failure.connectivityGeneration == connectivityGeneration else {
+                spotifyFailuresByBarcode.removeValue(forKey: barcodeCandidate)
+                return nil
+            }
+
+            let formatter = ISO8601DateFormatter()
+            let timestamp = formatter.string(from: failure.timestamp)
+            return "Spotify retry suppressed for barcode \(barcodeCandidate) (last failure at \(timestamp): \(failure.reason))."
+        }
+    }
+
+    private func recordSpotifyFailureIfNeeded(_ error: Error, barcodeCandidate: String, job: inout Job) -> Bool {
+        guard isSpotifyLookupFailure(error) else { return false }
+        recordSpotifyFailure(reason: error.localizedDescription, barcodeCandidate: barcodeCandidate, job: &job)
+        return true
+    }
+
+    private func isSpotifyLookupFailure(_ error: Error) -> Bool {
+        guard let appError = error as? AppError,
+              case .network(let message) = appError else {
+            return false
+        }
+        return message.localizedCaseInsensitiveContains("spotify")
+    }
+
+    private func recordSpotifyFailure(reason: String, barcodeCandidate: String, job: inout Job) {
+        let timestamp = Date()
+        let generation = stateQueue.sync { () -> UInt64 in
+            spotifyFailuresByBarcode[barcodeCandidate] = SpotifyFailureRecord(
+                reason: reason,
+                timestamp: timestamp,
+                connectivityGeneration: connectivityGeneration
+            )
+            return connectivityGeneration
+        }
+
+        let formatter = ISO8601DateFormatter()
+        job.errorDescription = "Spotify lookup failed for barcode \(barcodeCandidate) at \(formatter.string(from: timestamp)) (connectivity=\(generation)): \(reason)"
     }
 
     private func loadImage(_ identifier: String) -> UIImage? {
