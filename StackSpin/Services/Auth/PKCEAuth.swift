@@ -2,6 +2,7 @@ import AuthenticationServices
 import Combine
 import CryptoKit
 import Foundation
+import os
 import UIKit
 import Security
 
@@ -17,6 +18,10 @@ final class SpotifyAuthController: NSObject, ObservableObject {
     private let clientID: String
     private let redirectURI = URL(string: "stackspin://auth")!
     private let keychain = KeychainHelper()
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "StackSpin",
+        category: "SpotifyAuth"
+    )
 
     override init() {
         self.clientID = Bundle.main.object(forInfoDictionaryKey: "SpotifyClientID") as? String ?? ""
@@ -91,6 +96,10 @@ final class SpotifyAuthController: NSObject, ObservableObject {
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error(
+                "Spotify token refresh failed. status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+            )
             throw AppError.network("Spotify refresh failed")
         }
         let payload = try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -126,6 +135,10 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         do {
             let (data, response) = try await URLSession.shared.data(for: request)
             guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                logger.error(
+                    "Spotify token exchange failed. status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                )
                 throw AppError.network("Spotify sign-in failed")
             }
             let payload = try JSONDecoder().decode(TokenResponse.self, from: data)
@@ -139,8 +152,17 @@ final class SpotifyAuthController: NSObject, ObservableObject {
                 self.tokens = tokens
             }
         } catch {
-            NSLog("Auth callback error: \(error)")
+            logger.error("Auth callback error: \(String(describing: error), privacy: .public)")
         }
+    }
+
+    private static func responseSnippet(from data: Data, maxLength: Int = 500) -> String {
+        guard !data.isEmpty else { return "<empty>" }
+        let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
+        if body.count > maxLength {
+            return String(body.prefix(maxLength)) + "…"
+        }
+        return body
     }
 }
 
