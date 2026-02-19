@@ -22,31 +22,47 @@ final class SpotifyAPI {
             logger.error("Spotify dependency failed endpoint=searchAlbum dependency=authToken error=\(String(describing: error), privacy: .public)")
             throw AppError.network("Spotify album search token dependency failed: \(error.localizedDescription)")
         }
-        var components = URLComponents(string: "https://api.spotify.com/v1/search")!
-        components.queryItems = [
-            URLQueryItem(name: "type", value: "album"),
-            URLQueryItem(name: "q", value: "album:\"\(title)\" artist:\"\(artist)\""),
-            URLQueryItem(name: "market", value: market),
-            URLQueryItem(name: "limit", value: "1")
-        ]
-        var request = URLRequest(url: components.url!)
-        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, http) = try await executeRequest(request, endpoint: "searchAlbum")
-        guard http.statusCode == 200 else {
+        var lastFailure: String?
+        let searchQueries = Self.searchQueryCandidates(artist: artist, title: title)
+
+        for query in searchQueries {
+            var components = URLComponents(string: "https://api.spotify.com/v1/search")!
+            components.queryItems = [
+                URLQueryItem(name: "type", value: "album"),
+                URLQueryItem(name: "q", value: query),
+                URLQueryItem(name: "market", value: market),
+                URLQueryItem(name: "limit", value: "1")
+            ]
+            var request = URLRequest(url: components.url!)
+            request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+            let (data, http) = try await executeRequest(request, endpoint: "searchAlbum")
+            if http.statusCode == 200 {
+                let result = try JSONDecoder().decode(SpotifySearchResponse.self, from: data)
+                guard let album = result.albums.items.first else { return nil }
+                return SpotifyAlbum(
+                    id: album.id,
+                    name: album.name,
+                    artist: album.artists.first?.name ?? artist,
+                    imageURL: URL(string: album.images.first?.url ?? ""),
+                    uri: album.uri
+                )
+            }
+
+            let body = Self.responseSnippet(from: data)
+            lastFailure = "Spotify album search failed (status \(http.statusCode)): \(body)"
             logger.error(
-                "Spotify HTTP failure endpoint=searchAlbum status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                "Spotify HTTP failure endpoint=searchAlbum status=\(http.statusCode, privacy: .public) body=\(body, privacy: .public) queryLength=\(query.count, privacy: .public)"
             )
-            throw AppError.network("Spotify album search failed (status \(http.statusCode)): \(Self.responseSnippet(from: data))")
+
+            if http.statusCode == 400,
+               body.localizedCaseInsensitiveContains("Query exceeds maximum length") {
+                continue
+            }
+
+            throw AppError.network(lastFailure ?? "Spotify album search failed")
         }
-        let result = try JSONDecoder().decode(SpotifySearchResponse.self, from: data)
-        guard let album = result.albums.items.first else { return nil }
-        return SpotifyAlbum(
-            id: album.id,
-            name: album.name,
-            artist: album.artists.first?.name ?? artist,
-            imageURL: URL(string: album.images.first?.url ?? ""),
-            uri: album.uri
-        )
+
+        throw AppError.network(lastFailure ?? "Spotify album search failed")
     }
 
     func albumTracks(albumID: String) async throws -> [SpotifyTrack] {
@@ -89,14 +105,7 @@ final class SpotifyAPI {
             logger.error("Spotify dependency failed endpoint=addTracks dependency=authToken error=\(String(describing: error), privacy: .public)")
             throw AppError.network("Spotify add tracks token dependency failed: \(error.localizedDescription)")
         }
-        do {
-            try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
-        } catch {
-            // Ownership/collaboration checks require additional read scopes and can fail
-            // even when playlist write operations are allowed. Continue and rely on the
-            // write endpoint's response as the source of truth.
-            logger.error("Spotify write-access preflight failed endpoint=addTracks-preflight error=\(String(describing: error), privacy: .public)")
-        }
+        try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
@@ -208,6 +217,30 @@ final class SpotifyAPI {
             return String(body.prefix(maxLength)) + "…"
         }
         return body
+    }
+
+    private static func searchQueryCandidates(artist: String, title: String, limit: Int = 250) -> [String] {
+        let normalizedTitle = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedArtist = artist.trimmingCharacters(in: .whitespacesAndNewlines)
+        let preferred = "album:\"\(normalizedTitle)\" artist:\"\(normalizedArtist)\""
+        let albumOnly = "album:\"\(normalizedTitle)\""
+        let titleArtist = "\(normalizedTitle) \(normalizedArtist)"
+        let titleOnly = normalizedTitle
+
+        var candidates: [String] = []
+        var seen = Set<String>()
+        for candidate in [preferred, albumOnly, titleArtist, titleOnly] where !candidate.isEmpty {
+            let truncatedCandidate = Self.truncated(candidate, maxCharacters: limit)
+            if seen.insert(truncatedCandidate).inserted {
+                candidates.append(truncatedCandidate)
+            }
+        }
+        return candidates
+    }
+
+    private static func truncated(_ value: String, maxCharacters: Int) -> String {
+        guard value.count > maxCharacters else { return value }
+        return String(value.prefix(maxCharacters))
     }
 }
 
