@@ -71,23 +71,31 @@ final class Resolver {
                 try await enrichJob(&job, with: match, market: market)
                 return true
             }
+            let discogsReleases: [DiscogsRelease]
             do {
-                let discogsReleases = try await discogs.searchByBarcode(candidate)
-                if let first = discogsReleases.first {
-                    let release = MBRelease(
-                        id: String(first.id),
-                        title: first.title,
-                        artistCredit: first.artist,
-                        date: first.year.map { String($0) },
-                        label: first.label,
-                        barcode: first.barcode,
-                        country: nil
-                    )
+                discogsReleases = try await discogs.searchByBarcode(candidate)
+            } catch {
+                NSLog("Discogs barcode lookup failed for candidate \(candidate): \(error)")
+                continue
+            }
+
+            if let first = discogsReleases.first {
+                let release = MBRelease(
+                    id: String(first.id),
+                    title: first.title,
+                    artistCredit: first.artist,
+                    date: first.year.map { String($0) },
+                    label: first.label,
+                    barcode: first.barcode,
+                    country: nil
+                )
+                do {
                     try await enrichJob(&job, with: release, market: market)
                     return true
+                } catch {
+                    NSLog("Discogs release enrichment failed for candidate \(candidate): \(error)")
+                    throw error
                 }
-            } catch {
-                NSLog("Discogs fallback error: \(error)")
             }
         }
         return false
