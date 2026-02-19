@@ -145,10 +145,8 @@ final class SpotifyAPI {
                     )
                     if http.statusCode == 403 {
                         let spotifyError = Self.spotifyAPIError(from: data)
-                        let spotifyErrorStatus = spotifyError?.status ?? -1
-                        let spotifyErrorMessage = spotifyError?.message ?? "<missing>"
                         logger.error(
-                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) spotifyStatus=\(spotifyErrorStatus, privacy: .public) spotifyMessage=\(spotifyErrorMessage, privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
+                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) spotifyStatus=\(spotifyError?.status ?? -1, privacy: .public) spotifyMessage=\(spotifyError?.message ?? \"<missing>\", privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
                         )
 
                         if !hasRetriedAfterRefresh {
