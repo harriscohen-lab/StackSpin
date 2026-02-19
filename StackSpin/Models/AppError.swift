@@ -2,6 +2,8 @@ import Foundation
 
 enum AppError: LocalizedError, Identifiable {
     case spotifyAuth
+    case spotifyAuthCancelled
+    case spotifyAuthStateMismatch
     case network(String)
     case parsing
     case noPlaylist
@@ -13,6 +15,10 @@ enum AppError: LocalizedError, Identifiable {
         switch self {
         case .spotifyAuth:
             return "Please sign in with Spotify to continue."
+        case .spotifyAuthCancelled:
+            return "Spotify sign-in was cancelled."
+        case .spotifyAuthStateMismatch:
+            return "Spotify sign-in couldn’t be verified. Please try again."
         case .network(let message):
             return message
         case .parsing:

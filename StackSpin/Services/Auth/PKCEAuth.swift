@@ -55,17 +55,49 @@ final class SpotifyAuthController: NSObject, ObservableObject {
 
         guard let url = components.url else { throw AppError.spotifyAuth }
 
-        let session = ASWebAuthenticationSession(url: url, callbackURLScheme: redirectURI.scheme) { [weak self] callbackURL, error in
-            guard let callbackURL, error == nil else {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let session = ASWebAuthenticationSession(url: url, callbackURLScheme: redirectURI.scheme) { [weak self] callbackURL, error in
+                Task { @MainActor in
+                    defer { self?.currentSession = nil }
+
+                    if let authError = error as? ASWebAuthenticationSessionError,
+                       authError.code == .canceledLogin {
+                        continuation.resume(throwing: AppError.spotifyAuthCancelled)
+                        return
+                    }
+
+                    if error != nil {
+                        continuation.resume(throwing: AppError.spotifyAuth)
+                        return
+                    }
+
+                    guard let self else {
+                        continuation.resume(throwing: AppError.unknown)
+                        return
+                    }
+
+                    guard let callbackURL else {
+                        continuation.resume(throwing: AppError.spotifyAuth)
+                        return
+                    }
+
+                    do {
+                        try await self.handleCallback(url: callbackURL, verifier: verifier, expectedState: state)
+                        continuation.resume(returning: ())
+                    } catch {
+                        continuation.resume(throwing: error)
+                    }
+                }
+            }
+
+            self.currentSession = session
+            session.presentationContextProvider = self
+            guard session.start() else {
+                self.currentSession = nil
+                continuation.resume(throwing: AppError.spotifyAuth)
                 return
             }
-            Task {
-                await self?.handleCallback(url: callbackURL, verifier: verifier)
-            }
         }
-        currentSession = session
-        session.presentationContextProvider = self
-        session.start()
     }
 
     func restoreIfPossible() async {
@@ -108,9 +140,31 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         return newTokens.accessToken
     }
 
-    private func handleCallback(url: URL, verifier: CodeVerifier) async {
-        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
-              let code = components.queryItems?.first(where: { $0.name == "code" })?.value else { return }
+    private func handleCallback(url: URL, verifier: CodeVerifier, expectedState: String) async throws {
+        guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else {
+            throw AppError.spotifyAuth
+        }
+
+        let queryItems = components.queryItems ?? []
+
+        if let callbackError = queryItems.first(where: { $0.name == "error" })?.value {
+            if callbackError == "access_denied" {
+                throw AppError.spotifyAuthCancelled
+            }
+
+            let message = queryItems.first(where: { $0.name == "error_description" })?.value ?? callbackError
+            throw AppError.network("Spotify authorization failed: \(message)")
+        }
+
+        if let callbackState = queryItems.first(where: { $0.name == "state" })?.value,
+           callbackState != expectedState {
+            throw AppError.spotifyAuthStateMismatch
+        }
+
+        guard let code = queryItems.first(where: { $0.name == "code" })?.value,
+              !code.isEmpty else {
+            throw AppError.spotifyAuth
+        }
 
         let body = [
             "client_id": clientID,
@@ -125,19 +179,15 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.httpBody = body
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        do {
-            let payload = try await performTokenRequest(request, operation: "exchange")
-            let tokens = SpotifyTokens(
-                accessToken: payload.accessToken,
-                refreshToken: payload.refreshToken ?? self.tokens?.refreshToken ?? "",
-                expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn))
-            )
-            keychain.write(tokens, key: "spotifyTokens")
-            await MainActor.run {
-                self.tokens = tokens
-            }
-        } catch {
-            logger.error("Auth callback error: \(String(describing: error), privacy: .public)")
+        let payload = try await performTokenRequest(request, operation: "exchange")
+        let tokens = SpotifyTokens(
+            accessToken: payload.accessToken,
+            refreshToken: payload.refreshToken ?? self.tokens?.refreshToken ?? "",
+            expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn))
+        )
+        keychain.write(tokens, key: "spotifyTokens")
+        await MainActor.run {
+            self.tokens = tokens
         }
     }
 
