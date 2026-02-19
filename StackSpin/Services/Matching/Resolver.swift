@@ -71,7 +71,7 @@ final class Resolver {
                 try await enrichJob(&job, with: match, market: market)
                 return true
             }
-            let discogsReleases: [DGRelease]
+            let discogsReleases: [DiscogsRelease]
             do {
                 discogsReleases = try await discogs.searchByBarcode(candidate)
             } catch {
