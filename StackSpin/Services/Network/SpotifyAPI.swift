@@ -15,7 +15,13 @@ final class SpotifyAPI {
     }
 
     func searchAlbum(artist: String, title: String, market: String) async throws -> SpotifyAlbum? {
-        let token = try await authController.withValidToken()
+        let token: String
+        do {
+            token = try await authController.withValidToken()
+        } catch {
+            logger.error("Spotify dependency failed endpoint=searchAlbum dependency=authToken error=\(String(describing: error), privacy: .public)")
+            throw AppError.network("Spotify album search token dependency failed: \(error.localizedDescription)")
+        }
         var components = URLComponents(string: "https://api.spotify.com/v1/search")!
         components.queryItems = [
             URLQueryItem(name: "type", value: "album"),
@@ -25,13 +31,12 @@ final class SpotifyAPI {
         ]
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let (data, http) = try await executeRequest(request, endpoint: "searchAlbum")
+        guard http.statusCode == 200 else {
             logger.error(
-                "Spotify request failed endpoint=searchAlbum status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                "Spotify HTTP failure endpoint=searchAlbum status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
             )
-            throw AppError.network("Spotify album search failed")
+            throw AppError.network("Spotify album search failed (status \(http.statusCode)): \(Self.responseSnippet(from: data))")
         }
         let result = try JSONDecoder().decode(SpotifySearchResponse.self, from: data)
         guard let album = result.albums.items.first else { return nil }
@@ -45,18 +50,23 @@ final class SpotifyAPI {
     }
 
     func albumTracks(albumID: String) async throws -> [SpotifyTrack] {
-        let token = try await authController.withValidToken()
+        let token: String
+        do {
+            token = try await authController.withValidToken()
+        } catch {
+            logger.error("Spotify dependency failed endpoint=albumTracks dependency=authToken error=\(String(describing: error), privacy: .public)")
+            throw AppError.network("Spotify tracks lookup token dependency failed: \(error.localizedDescription)")
+        }
         var components = URLComponents(string: "https://api.spotify.com/v1/albums/\(albumID)/tracks")!
         components.queryItems = [URLQueryItem(name: "limit", value: "50")]
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let (data, http) = try await executeRequest(request, endpoint: "albumTracks")
+        guard http.statusCode == 200 else {
             logger.error(
-                "Spotify request failed endpoint=albumTracks status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                "Spotify HTTP failure endpoint=albumTracks status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
             )
-            throw AppError.network("Spotify tracks fetch failed")
+            throw AppError.network("Spotify tracks fetch failed (status \(http.statusCode)): \(Self.responseSnippet(from: data))")
         }
         let result = try JSONDecoder().decode(SpotifyTracksResponse.self, from: data)
         return result.items.map { item in
@@ -72,7 +82,13 @@ final class SpotifyAPI {
 
     func addTracks(playlistID: String, trackURIs: [String]) async throws {
         guard !trackURIs.isEmpty else { return }
-        let token = try await authController.withValidToken()
+        let token: String
+        do {
+            token = try await authController.withValidToken()
+        } catch {
+            logger.error("Spotify dependency failed endpoint=addTracks dependency=authToken error=\(String(describing: error), privacy: .public)")
+            throw AppError.network("Spotify add tracks token dependency failed: \(error.localizedDescription)")
+        }
         do {
             try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
         } catch {
@@ -94,10 +110,7 @@ final class SpotifyAPI {
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                 request.httpBody = try JSONEncoder().encode(["uris": chunk])
 
-                let (data, response) = try await session.data(for: request)
-                guard let http = response as? HTTPURLResponse else {
-                    throw AppError.network("Spotify add tracks failed")
-                }
+                let (data, http) = try await executeRequest(request, endpoint: "addTracks")
                 if http.statusCode == 429,
                    let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
                    let delay = Double(retryAfter) {
@@ -137,13 +150,12 @@ final class SpotifyAPI {
     private func currentUserProfile(token: String) async throws -> SpotifyCurrentUser {
         var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/me")!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let (data, http) = try await executeRequest(request, endpoint: "currentUserProfile")
+        guard http.statusCode == 200 else {
             logger.error(
-                "Spotify request failed endpoint=currentUserProfile status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                "Spotify HTTP failure endpoint=currentUserProfile status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
             )
-            throw AppError.network("Spotify profile fetch failed")
+            throw AppError.network("Spotify profile fetch failed (status \(http.statusCode)): \(Self.responseSnippet(from: data))")
         }
         return try JSONDecoder().decode(SpotifyCurrentUser.self, from: data)
     }
@@ -155,15 +167,38 @@ final class SpotifyAPI {
         ]
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+        let (data, http) = try await executeRequest(request, endpoint: "playlistMetadata")
+        guard http.statusCode == 200 else {
             logger.error(
-                "Spotify request failed endpoint=playlistMetadata status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                "Spotify HTTP failure endpoint=playlistMetadata status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
             )
-            throw AppError.network("Spotify playlist lookup failed")
+            throw AppError.network("Spotify playlist lookup failed (status \(http.statusCode)): \(Self.responseSnippet(from: data))")
         }
         return try JSONDecoder().decode(SpotifyPlaylistMetadata.self, from: data)
+    }
+
+    private func executeRequest(_ request: URLRequest, endpoint: String) async throws -> (Data, HTTPURLResponse) {
+        logger.debug(
+            "Spotify request start endpoint=\(endpoint, privacy: .public) method=\((request.httpMethod ?? "GET"), privacy: .public) url=\((request.url?.absoluteString ?? "<nil>"), privacy: .public)"
+        )
+        do {
+            let (data, response) = try await session.data(for: request)
+            guard let http = response as? HTTPURLResponse else {
+                logger.error("Spotify request failed endpoint=\(endpoint, privacy: .public) reason=nonHTTPResponse")
+                throw AppError.network("Spotify request failed for \(endpoint): non-HTTP response")
+            }
+            return (data, http)
+        } catch let urlError as URLError {
+            logger.error(
+                "Spotify transport error endpoint=\(endpoint, privacy: .public) domain=\(urlError.errorDomain, privacy: .public) code=\(urlError.errorCode, privacy: .public) message=\(urlError.localizedDescription, privacy: .public)"
+            )
+            throw AppError.network(
+                "Spotify transport failed for \(endpoint) [\(urlError.errorDomain):\(urlError.errorCode)] \(urlError.localizedDescription)"
+            )
+        } catch {
+            logger.error("Spotify request failed endpoint=\(endpoint, privacy: .public) reason=unexpectedError error=\(String(describing: error), privacy: .public)")
+            throw error
+        }
     }
 
     private static func responseSnippet(from data: Data, maxLength: Int = 500) -> String {
