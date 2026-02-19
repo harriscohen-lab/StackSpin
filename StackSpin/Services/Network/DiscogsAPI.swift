@@ -48,6 +48,27 @@ private struct SearchResponse: Decodable {
         let barcode: [String]?
         let type: String
 
+        private enum CodingKeys: String, CodingKey {
+            case id, title, year, label, barcode, type
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decode(Int.self, forKey: .id)
+            title = try container.decode(String.self, forKey: .title)
+            label = try container.decode([String].self, forKey: .label)
+            barcode = try container.decodeIfPresent([String].self, forKey: .barcode)
+            type = try container.decode(String.self, forKey: .type)
+
+            if let intYear = try? container.decodeIfPresent(Int.self, forKey: .year) {
+                year = intYear
+            } else if let stringYear = try? container.decodeIfPresent(String.self, forKey: .year) {
+                year = Int(stringYear)
+            } else {
+                year = nil
+            }
+        }
+
         var artist: String {
             title.split(separator: "-").first.map { $0.trimmingCharacters(in: .whitespaces) } ?? title
         }
