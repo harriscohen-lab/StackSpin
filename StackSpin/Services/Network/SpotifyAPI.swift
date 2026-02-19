@@ -1,8 +1,13 @@
 import Foundation
+import os
 
 final class SpotifyAPI {
     private let authController: SpotifyAuthController
     private let session: URLSession
+    private let logger = Logger(
+        subsystem: Bundle.main.bundleIdentifier ?? "StackSpin",
+        category: "SpotifyAPI"
+    )
 
     init(authController: SpotifyAuthController, session: URLSession = .shared) {
         self.authController = authController
@@ -22,6 +27,10 @@ final class SpotifyAPI {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error(
+                "Spotify request failed endpoint=searchAlbum status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+            )
             throw AppError.network("Spotify album search failed")
         }
         let result = try JSONDecoder().decode(SpotifySearchResponse.self, from: data)
@@ -43,6 +52,10 @@ final class SpotifyAPI {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error(
+                "Spotify request failed endpoint=albumTracks status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+            )
             throw AppError.network("Spotify tracks fetch failed")
         }
         let result = try JSONDecoder().decode(SpotifyTracksResponse.self, from: data)
@@ -66,7 +79,7 @@ final class SpotifyAPI {
             // Ownership/collaboration checks require additional read scopes and can fail
             // even when playlist write operations are allowed. Continue and rely on the
             // write endpoint's response as the source of truth.
-            NSLog("Spotify write-access preflight failed, continuing with add request: \(error)")
+            logger.error("Spotify write-access preflight failed endpoint=addTracks-preflight error=\(String(describing: error), privacy: .public)")
         }
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
@@ -88,17 +101,22 @@ final class SpotifyAPI {
                 if http.statusCode == 429,
                    let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
                    let delay = Double(retryAfter) {
+                    logger.error(
+                        "Spotify request throttled endpoint=addTracks status=429 retryAfter=\(delay, privacy: .public)"
+                    )
                     try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
                     continue
                 }
                 guard 200..<300 ~= http.statusCode else {
-                    let message = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    logger.error(
+                        "Spotify request failed endpoint=addTracks status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                    )
                     if http.statusCode == 403 {
                         throw AppError.network(
-                            "Spotify add tracks failed (403 Forbidden). Make sure the selected playlist belongs to the signed-in account or is collaborative, then reconnect Spotify and try again. Response: \(message)"
+                            "Spotify add tracks failed (403 Forbidden). Make sure the selected playlist belongs to the signed-in account or is collaborative, then reconnect Spotify and try again."
                         )
                     }
-                    throw AppError.network("Spotify add tracks failed: \(message)")
+                    throw AppError.network("Spotify add tracks failed")
                 }
                 success = true
             }
@@ -121,8 +139,11 @@ final class SpotifyAPI {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw AppError.network("Spotify profile fetch failed: \(message)")
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error(
+                "Spotify request failed endpoint=currentUserProfile status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+            )
+            throw AppError.network("Spotify profile fetch failed")
         }
         return try JSONDecoder().decode(SpotifyCurrentUser.self, from: data)
     }
@@ -136,10 +157,22 @@ final class SpotifyAPI {
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let message = String(data: data, encoding: .utf8) ?? "Unknown error"
-            throw AppError.network("Spotify playlist lookup failed: \(message)")
+            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+            logger.error(
+                "Spotify request failed endpoint=playlistMetadata status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+            )
+            throw AppError.network("Spotify playlist lookup failed")
         }
         return try JSONDecoder().decode(SpotifyPlaylistMetadata.self, from: data)
+    }
+
+    private static func responseSnippet(from data: Data, maxLength: Int = 500) -> String {
+        guard !data.isEmpty else { return "<empty>" }
+        let body = String(data: data, encoding: .utf8) ?? "<non-utf8 body>"
+        if body.count > maxLength {
+            return String(body.prefix(maxLength)) + "…"
+        }
+        return body
     }
 }
 
