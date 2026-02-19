@@ -75,6 +75,13 @@ struct SettingsView: View {
             do {
                 try await spotifyAuth.signIn()
                 spotifyMessage = "Spotify account reconnected."
+            } catch let appError as AppError {
+                switch appError {
+                case .spotifyAuthCancelled:
+                    spotifyMessage = "Spotify sign-in cancelled."
+                default:
+                    spotifyMessage = appError.localizedDescription
+                }
             } catch {
                 spotifyMessage = error.localizedDescription
             }
