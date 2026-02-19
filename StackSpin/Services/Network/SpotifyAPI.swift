@@ -190,10 +190,10 @@ final class SpotifyAPI {
             return (data, http)
         } catch let urlError as URLError {
             logger.error(
-                "Spotify transport error endpoint=\(endpoint, privacy: .public) domain=\(urlError.errorDomain, privacy: .public) code=\(urlError.errorCode, privacy: .public) message=\(urlError.localizedDescription, privacy: .public)"
+                "Spotify transport error endpoint=\(endpoint, privacy: .public) domain=\(NSURLErrorDomain, privacy: .public) code=\(urlError.code.rawValue, privacy: .public) message=\(urlError.localizedDescription, privacy: .public)"
             )
             throw AppError.network(
-                "Spotify transport failed for \(endpoint) [\(urlError.errorDomain):\(urlError.errorCode)] \(urlError.localizedDescription)"
+                "Spotify transport failed for \(endpoint) [\(NSURLErrorDomain):\(urlError.code.rawValue)] \(urlError.localizedDescription)"
             )
         } catch {
             logger.error("Spotify request failed endpoint=\(endpoint, privacy: .public) reason=unexpectedError error=\(String(describing: error), privacy: .public)")
