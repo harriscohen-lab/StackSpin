@@ -22,6 +22,7 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         subsystem: Bundle.main.bundleIdentifier ?? "StackSpin",
         category: "SpotifyAuth"
     )
+    private let transientRetryDelayNanoseconds: UInt64 = 400_000_000
 
     override init() {
         self.clientID = Bundle.main.object(forInfoDictionaryKey: "SpotifyClientID") as? String ?? ""
@@ -94,15 +95,7 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.httpBody = body
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-            let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-            logger.error(
-                "Spotify token refresh failed. status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
-            )
-            throw AppError.network("Spotify refresh failed")
-        }
-        let payload = try JSONDecoder().decode(TokenResponse.self, from: data)
+        let payload = try await performTokenRequest(request, operation: "refresh")
         let newTokens = SpotifyTokens(
             accessToken: payload.accessToken,
             refreshToken: tokens.refreshToken,
@@ -133,15 +126,7 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
-                logger.error(
-                    "Spotify token exchange failed. status=\(statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
-                )
-                throw AppError.network("Spotify sign-in failed")
-            }
-            let payload = try JSONDecoder().decode(TokenResponse.self, from: data)
+            let payload = try await performTokenRequest(request, operation: "exchange")
             let tokens = SpotifyTokens(
                 accessToken: payload.accessToken,
                 refreshToken: payload.refreshToken ?? self.tokens?.refreshToken ?? "",
@@ -153,6 +138,69 @@ final class SpotifyAuthController: NSObject, ObservableObject {
             }
         } catch {
             logger.error("Auth callback error: \(String(describing: error), privacy: .public)")
+        }
+    }
+
+    private func performTokenRequest(_ request: URLRequest, operation: String) async throws -> TokenResponse {
+        var attempt = 0
+        while true {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: request)
+                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
+                    let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
+                    let bodySnippet = Self.responseSnippet(from: data)
+                    logger.error(
+                        "Spotify token \(operation, privacy: .public) failed. status=\(statusCode, privacy: .public) body=\(bodySnippet, privacy: .public)"
+                    )
+
+                    if let authError = try? JSONDecoder().decode(TokenErrorResponse.self, from: data),
+                       authError.isDefinitiveAuthFailure {
+                        throw AppError.spotifyAuth
+                    }
+
+                    throw AppError.network("Spotify \(operation) failed")
+                }
+
+                return try JSONDecoder().decode(TokenResponse.self, from: data)
+            } catch let urlError as URLError {
+                guard shouldRetryAfterTransportFailure(urlError, attempt: attempt, operation: operation) else {
+                    throw AppError.network("Spotify \(operation) failed")
+                }
+
+                attempt += 1
+                try await Task.sleep(nanoseconds: transientRetryDelayNanoseconds)
+            }
+        }
+    }
+
+    private func shouldRetryAfterTransportFailure(_ error: URLError, attempt: Int, operation: String) -> Bool {
+        let canRetry = attempt == 0
+        switch error.code {
+        case .notConnectedToInternet:
+            logger.error(
+                "Spotify token \(operation, privacy: .public) transport failure: no internet connection. retrying=\(canRetry, privacy: .public)"
+            )
+            return canRetry
+        case .timedOut:
+            logger.error(
+                "Spotify token \(operation, privacy: .public) transport failure: request timed out. retrying=\(canRetry, privacy: .public)"
+            )
+            return canRetry
+        case .cannotFindHost:
+            logger.error(
+                "Spotify token \(operation, privacy: .public) transport failure: cannot find host. retrying=\(canRetry, privacy: .public)"
+            )
+            return canRetry
+        case .networkConnectionLost:
+            logger.error(
+                "Spotify token \(operation, privacy: .public) transport failure: network connection lost. retrying=\(canRetry, privacy: .public)"
+            )
+            return canRetry
+        default:
+            logger.error(
+                "Spotify token \(operation, privacy: .public) transport error: \(error.localizedDescription, privacy: .public)"
+            )
+            return false
         }
     }
 
@@ -184,6 +232,14 @@ private struct TokenResponse: Decodable {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
+    }
+}
+
+private struct TokenErrorResponse: Decodable {
+    let error: String
+
+    var isDefinitiveAuthFailure: Bool {
+        error == "invalid_grant" || error == "invalid_client"
     }
 }
 
