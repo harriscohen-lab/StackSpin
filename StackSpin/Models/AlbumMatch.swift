@@ -66,3 +66,6 @@ struct DGRelease: Identifiable, Codable {
     let label: String?
     let barcode: String?
 }
+
+// Backwards-compatible alias for older references.
+typealias DiscogsRelease = DGRelease
