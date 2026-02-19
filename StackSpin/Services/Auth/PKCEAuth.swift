@@ -43,7 +43,7 @@ final class SpotifyAuthController: NSObject, ObservableObject {
             URLQueryItem(name: "redirect_uri", value: redirectURI.absoluteString),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "scope", value: "playlist-modify-public playlist-modify-private"),
+            URLQueryItem(name: "scope", value: "playlist-modify-public playlist-modify-private playlist-read-private playlist-read-collaborative"),
             URLQueryItem(name: "state", value: state)
         ]
 

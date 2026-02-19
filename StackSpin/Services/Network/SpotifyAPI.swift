@@ -60,7 +60,14 @@ final class SpotifyAPI {
     func addTracks(playlistID: String, trackURIs: [String]) async throws {
         guard !trackURIs.isEmpty else { return }
         let token = try await authController.withValidToken()
-        try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
+        do {
+            try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
+        } catch {
+            // Ownership/collaboration checks require additional read scopes and can fail
+            // even when playlist write operations are allowed. Continue and rely on the
+            // write endpoint's response as the source of truth.
+            NSLog("Spotify write-access preflight failed, continuing with add request: \(error)")
+        }
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
