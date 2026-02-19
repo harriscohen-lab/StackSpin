@@ -98,22 +98,31 @@ final class SpotifyAPI {
 
     func addTracks(playlistID: String, trackURIs: [String]) async throws {
         guard !trackURIs.isEmpty else { return }
-        let token: String
+        guard let normalizedPlaylistID = AppSettings.normalizedPlaylistID(from: playlistID),
+              normalizedPlaylistID == playlistID.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedPlaylistID.isEmpty else {
+            throw AppError.network(
+                "Spotify playlist selection is stale or invalid. Reconnect Spotify and reselect a writable playlist."
+            )
+        }
+
+        var token: String
         do {
             token = try await authController.withValidToken()
         } catch {
             logger.error("Spotify dependency failed endpoint=addTracks dependency=authToken error=\(String(describing: error), privacy: .public)")
             throw AppError.network("Spotify add tracks token dependency failed: \(error.localizedDescription)")
         }
-        try await validatePlaylistWriteAccess(playlistID: playlistID, token: token)
+        var writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
         }
         for chunk in chunks {
             var success = false
+            var hasRetriedAfterRefresh = false
             while !success {
-                var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/playlists/\(playlistID)/tracks")!)
+                var request = URLRequest(url: URL(string: "https://api.spotify.com/v1/playlists/\(normalizedPlaylistID)/tracks")!)
                 request.httpMethod = "POST"
                 request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -130,12 +139,31 @@ final class SpotifyAPI {
                     continue
                 }
                 guard 200..<300 ~= http.statusCode else {
+                    let bodySnippet = Self.responseSnippet(from: data)
                     logger.error(
-                        "Spotify request failed endpoint=addTracks status=\(http.statusCode, privacy: .public) body=\(Self.responseSnippet(from: data), privacy: .public)"
+                        "Spotify request failed endpoint=addTracks status=\(http.statusCode, privacy: .public) body=\(bodySnippet, privacy: .public)"
                     )
                     if http.statusCode == 403 {
+                        let spotifyError = Self.spotifyAPIError(from: data)
+                        let spotifyErrorStatus = spotifyError?.status ?? -1
+                        let spotifyErrorMessage = spotifyError?.message ?? "<missing>"
+                        logger.error(
+                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) spotifyStatus=\(spotifyErrorStatus, privacy: .public) spotifyMessage=\(spotifyErrorMessage, privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
+                        )
+
+                        if !hasRetriedAfterRefresh {
+                            hasRetriedAfterRefresh = true
+                            do {
+                                token = try await authController.forceRefreshToken()
+                                writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+                                continue
+                            } catch {
+                                logger.error("Spotify addTracks forced refresh failed playlistID=\(normalizedPlaylistID, privacy: .public) error=\(String(describing: error), privacy: .public)")
+                            }
+                        }
+
                         throw AppError.network(
-                            "Spotify add tracks failed (403 Forbidden). Make sure the selected playlist belongs to the signed-in account or is collaborative, then reconnect Spotify and try again."
+                            "Spotify add tracks failed (403 Forbidden). Signed in as @\(writeContext.signedInUserID); playlist owned by @\(writeContext.ownerID); collaborative=\(writeContext.collaborative). Reconnect Spotify and reselect a writable playlist."
                         )
                     }
                     throw AppError.network("Spotify add tracks failed")
@@ -145,15 +173,31 @@ final class SpotifyAPI {
         }
     }
 
-    private func validatePlaylistWriteAccess(playlistID: String, token: String) async throws {
+    private func validatePlaylistWriteAccess(playlistID: String, token: String) async throws -> PlaylistWriteContext {
+        guard let normalizedPlaylistID = AppSettings.normalizedPlaylistID(from: playlistID),
+              normalizedPlaylistID == playlistID.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalizedPlaylistID.isEmpty else {
+            throw AppError.network(
+                "Spotify playlist selection is stale or invalid. Reconnect Spotify and reselect a writable playlist."
+            )
+        }
+
         let profile = try await currentUserProfile(token: token)
-        let playlist = try await playlistMetadata(playlistID: playlistID, token: token)
+        let playlist = try await playlistMetadata(playlistID: normalizedPlaylistID, token: token)
+        let context = PlaylistWriteContext(
+            signedInUserID: profile.id,
+            playlistID: normalizedPlaylistID,
+            ownerID: playlist.owner.id,
+            collaborative: playlist.collaborative
+        )
 
         guard playlist.isWritable(byUserID: profile.id) else {
             throw AppError.network(
-                "Spotify playlist is not writable by the current account. Signed in as @\(profile.id), playlist owner is @\(playlist.owner.id). Select a playlist you own or a collaborative playlist."
+                "Spotify playlist is not writable by the current account. Signed in as @\(context.signedInUserID); playlist owned by @\(context.ownerID); collaborative=\(context.collaborative). Reconnect Spotify and reselect a writable playlist."
             )
         }
+
+        return context
     }
 
     private func currentUserProfile(token: String) async throws -> SpotifyCurrentUser {
@@ -242,6 +286,29 @@ final class SpotifyAPI {
         guard value.count > maxCharacters else { return value }
         return String(value.prefix(maxCharacters))
     }
+
+    private static func spotifyAPIError(from data: Data) -> SpotifyAPIErrorDetail? {
+        guard let payload = try? JSONDecoder().decode(SpotifyAPIErrorPayload.self, from: data) else {
+            return nil
+        }
+        return payload.error
+    }
+}
+
+private struct PlaylistWriteContext {
+    let signedInUserID: String
+    let playlistID: String
+    let ownerID: String
+    let collaborative: Bool
+}
+
+private struct SpotifyAPIErrorPayload: Decodable {
+    let error: SpotifyAPIErrorDetail
+}
+
+private struct SpotifyAPIErrorDetail: Decodable {
+    let status: Int?
+    let message: String?
 }
 
 private struct SpotifySearchResponse: Decodable {

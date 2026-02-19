@@ -115,6 +115,10 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         return try await refreshToken()
     }
 
+    func forceRefreshToken() async throws -> String {
+        try await refreshToken()
+    }
+
     private func refreshToken() async throws -> String {
         guard let tokens else { throw AppError.spotifyAuth }
         let body = [
