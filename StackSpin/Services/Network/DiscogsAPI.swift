@@ -56,14 +56,23 @@ private struct SearchResponse: Decodable {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decode(Int.self, forKey: .id)
             title = try container.decode(String.self, forKey: .title)
-            label = try container.decode([String].self, forKey: .label)
+
+            if let labels = try? container.decode([String].self, forKey: .label) {
+                label = labels
+            } else if let singleLabel = try? container.decode(String.self, forKey: .label) {
+                label = [singleLabel]
+            } else {
+                label = []
+            }
+
             barcode = try container.decodeIfPresent([String].self, forKey: .barcode)
             type = try container.decode(String.self, forKey: .type)
 
             if let intYear = try? container.decodeIfPresent(Int.self, forKey: .year) {
                 year = intYear
             } else if let stringYear = try? container.decodeIfPresent(String.self, forKey: .year) {
-                year = Int(stringYear)
+                let digits = stringYear.filter(\.isNumber)
+                year = Int(digits)
             } else {
                 year = nil
             }
