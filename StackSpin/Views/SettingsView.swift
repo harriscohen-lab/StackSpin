@@ -81,7 +81,7 @@ struct SettingsView: View {
                 if let playlistID = settingsStore.settings.spotifyPlaylistID,
                    !playlistID.isEmpty {
                     let probe = try await spotifyAPI.probePlaylistWriteAccess(playlistID: playlistID)
-                    if probe.canWrite {
+                    if probe.ownershipOrCollaborativeAccess && probe.hasRequiredWriteScopes {
                         spotifyMessage = "Reconnect successful; write capability confirmed. \(probe.details)"
                     } else {
                         spotifyMessage = "Reconnect succeeded, but write permissions still denied. Reconnect Spotify to refresh playlist write permissions. \(probe.details)"

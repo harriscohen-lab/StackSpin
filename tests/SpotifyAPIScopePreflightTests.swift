@@ -61,6 +61,59 @@ final class SpotifyAPIScopePreflightTests: XCTestCase {
         )
     }
 
+
+    func testProbeOwnershipMatchButMissingPublicWriteScopeReturnsActionableFailure() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        let auth = SpotifyAuthController()
+        auth.debugInjectTokens(
+            SpotifyTokens(
+                accessToken: "access",
+                refreshToken: "refresh",
+                expirationDate: Date().addingTimeInterval(3600),
+                generation: 0,
+                grantedScopes: ["playlist-modify-private", "playlist-read-private"]
+            )
+        )
+
+        let api = SpotifyAPI(authController: auth, session: session)
+        let probe = try await api.probePlaylistWriteAccess(playlistID: "playlist123")
+
+        XCTAssertTrue(probe.ownershipOrCollaborativeAccess)
+        XCTAssertFalse(probe.hasRequiredWriteScopes)
+        XCTAssertEqual(probe.missingWriteScopes, ["playlist-modify-public"])
+        XCTAssertFalse(probe.canWrite)
+        XCTAssertTrue(probe.details.contains("Missing required Spotify scope(s): playlist-modify-public"))
+        XCTAssertTrue(probe.details.contains("Reconnect Spotify and approve these permissions"))
+    }
+
+    func testProbeOwnershipMatchAndPublicWriteScopePresentPasses() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        let auth = SpotifyAuthController()
+        auth.debugInjectTokens(
+            SpotifyTokens(
+                accessToken: "access",
+                refreshToken: "refresh",
+                expirationDate: Date().addingTimeInterval(3600),
+                generation: 0,
+                grantedScopes: ["playlist-modify-public", "playlist-read-private"]
+            )
+        )
+
+        let api = SpotifyAPI(authController: auth, session: session)
+        let probe = try await api.probePlaylistWriteAccess(playlistID: "playlist123")
+
+        XCTAssertTrue(probe.ownershipOrCollaborativeAccess)
+        XCTAssertTrue(probe.hasRequiredWriteScopes)
+        XCTAssertEqual(probe.missingWriteScopes, [])
+        XCTAssertTrue(probe.canWrite)
+    }
+
     func testUnknownGrantedScopesDoesNotBlockPreflight() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]
