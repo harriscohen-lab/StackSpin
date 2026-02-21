@@ -9,6 +9,10 @@ struct SettingsView: View {
     @State private var isReauthenticating = false
     @State private var spotifyMessage: String?
 
+    private var spotifyAPI: SpotifyAPI {
+        SpotifyAPI(authController: spotifyAuth)
+    }
+
     var body: some View {
         Form {
             Section("Spotify") {
@@ -74,11 +78,23 @@ struct SettingsView: View {
             spotifyMessage = nil
             do {
                 try await spotifyAuth.signIn()
-                spotifyMessage = "Spotify account reconnected."
+                if let playlistID = settingsStore.settings.spotifyPlaylistID,
+                   !playlistID.isEmpty {
+                    let probe = try await spotifyAPI.probePlaylistWriteAccess(playlistID: playlistID)
+                    if probe.canWrite {
+                        spotifyMessage = "Reconnect successful; write capability confirmed. \(probe.details)"
+                    } else {
+                        spotifyMessage = "Reconnect succeeded, but write permissions still denied. Reconnect Spotify to refresh playlist write permissions. \(probe.details)"
+                    }
+                } else {
+                    spotifyMessage = "Spotify account reconnected."
+                }
             } catch let appError as AppError {
                 switch appError {
                 case .spotifyAuthCancelled:
                     spotifyMessage = "Spotify sign-in cancelled."
+                case .spotifyPermissionsExpiredOrInsufficient:
+                    spotifyMessage = "Reconnect succeeded, but write permissions are still missing. Reconnect Spotify to refresh playlist write permissions."
                 default:
                     spotifyMessage = appError.localizedDescription
                 }

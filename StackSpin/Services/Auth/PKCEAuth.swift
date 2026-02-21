@@ -10,10 +10,34 @@ struct SpotifyTokens: Codable {
     let accessToken: String
     let refreshToken: String
     let expirationDate: Date
+    let generation: Int
+
+    init(accessToken: String, refreshToken: String, expirationDate: Date, generation: Int = 0) {
+        self.accessToken = accessToken
+        self.refreshToken = refreshToken
+        self.expirationDate = expirationDate
+        self.generation = generation
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case accessToken
+        case refreshToken
+        case expirationDate
+        case generation
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        accessToken = try container.decode(String.self, forKey: .accessToken)
+        refreshToken = try container.decode(String.self, forKey: .refreshToken)
+        expirationDate = try container.decode(Date.self, forKey: .expirationDate)
+        generation = try container.decodeIfPresent(Int.self, forKey: .generation) ?? 0
+    }
 }
 
 final class SpotifyAuthController: NSObject, ObservableObject {
     @Published private(set) var tokens: SpotifyTokens?
+    @Published private(set) var tokenSource: String = "none"
     private var currentSession: ASWebAuthenticationSession?
     private let clientID: String
     private let redirectURI = URL(string: "stackspin://auth")!
@@ -23,6 +47,11 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         category: "SpotifyAuth"
     )
     private let transientRetryDelayNanoseconds: UInt64 = 400_000_000
+
+    var tokenDiagnostics: String {
+        let generation = tokens?.generation ?? -1
+        return "source=\(tokenSource) generation=\(generation)"
+    }
 
     override init() {
         self.clientID = Bundle.main.object(forInfoDictionaryKey: "SpotifyClientID") as? String ?? ""
@@ -104,6 +133,7 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         if let stored: SpotifyTokens = keychain.read(key: "spotifyTokens") {
             await MainActor.run {
                 self.tokens = stored
+                self.tokenSource = "restored"
             }
         }
     }
@@ -132,14 +162,19 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let payload = try await performTokenRequest(request, operation: "refresh")
+        logger.debug(
+            "Spotify token refresh succeeded generationBefore=\(tokens.generation, privacy: .public) refreshTokenReturned=\(payload.refreshToken != nil, privacy: .public)"
+        )
         let newTokens = SpotifyTokens(
             accessToken: payload.accessToken,
             refreshToken: tokens.refreshToken,
-            expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn))
+            expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn)),
+            generation: tokens.generation + 1
         )
         keychain.write(newTokens, key: "spotifyTokens")
         await MainActor.run {
             self.tokens = newTokens
+            self.tokenSource = "refreshed"
         }
         return newTokens.accessToken
     }
@@ -184,14 +219,24 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let payload = try await performTokenRequest(request, operation: "exchange")
+        logger.debug(
+            "Spotify token exchange succeeded refreshTokenReturned=\(payload.refreshToken != nil, privacy: .public) previousTokenExists=\(self.tokens != nil, privacy: .public)"
+        )
+        if payload.refreshToken == nil, self.tokens?.refreshToken != nil {
+            logger.error(
+                "Spotify token exchange missing refresh token; falling back to existing stored refresh token generation=\(self.tokens?.generation ?? -1, privacy: .public)"
+            )
+        }
         let tokens = SpotifyTokens(
             accessToken: payload.accessToken,
             refreshToken: payload.refreshToken ?? self.tokens?.refreshToken ?? "",
-            expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn))
+            expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn)),
+            generation: (self.tokens?.generation ?? -1) + 1
         )
         keychain.write(tokens, key: "spotifyTokens")
         await MainActor.run {
             self.tokens = tokens
+            self.tokenSource = "exchange"
         }
     }
 
@@ -209,6 +254,8 @@ final class SpotifyAuthController: NSObject, ObservableObject {
 
                     if let authError = try? JSONDecoder().decode(TokenErrorResponse.self, from: data),
                        authError.isDefinitiveAuthFailure {
+                        logger.error("Spotify token \(operation, privacy: .public) definitive auth failure; clearing cached credentials")
+                        await clearCachedTokens()
                         throw AppError.spotifyAuth
                     }
 
@@ -265,6 +312,16 @@ final class SpotifyAuthController: NSObject, ObservableObject {
             return String(body.prefix(maxLength)) + "…"
         }
         return body
+    }
+}
+
+private extension SpotifyAuthController {
+    func clearCachedTokens() async {
+        keychain.delete(key: "spotifyTokens")
+        await MainActor.run {
+            self.tokens = nil
+            self.tokenSource = "cleared"
+        }
     }
 }
 
@@ -343,6 +400,14 @@ private final class KeychainHelper {
         let status = SecItemCopyMatching(query as CFDictionary, &item)
         guard status == errSecSuccess, let data = item as? Data else { return nil }
         return try? JSONDecoder().decode(T.self, from: data)
+    }
+
+    func delete(key: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: key
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }
 
