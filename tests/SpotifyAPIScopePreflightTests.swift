@@ -60,6 +60,37 @@ final class SpotifyAPIScopePreflightTests: XCTestCase {
             SpotifyAPIScopePreflightURLProtocol.requestLog.contains { $0.httpMethod == "POST" && $0.url?.path == "/v1/playlists/playlist123/tracks" }
         )
     }
+
+    func testUnknownGrantedScopesDoesNotBlockPreflight() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        let auth = SpotifyAuthController()
+        auth.debugInjectTokens(
+            SpotifyTokens(
+                accessToken: "access",
+                refreshToken: "refresh",
+                expirationDate: Date().addingTimeInterval(3600),
+                generation: 0,
+                grantedScopes: []
+            )
+        )
+
+        var callbackMissingScopes: Set<String> = []
+        let api = SpotifyAPI(
+            authController: auth,
+            session: session,
+            onMissingWriteScopes: { callbackMissingScopes = $0 }
+        )
+
+        try await api.addTracks(playlistID: "playlist123", trackURIs: ["spotify:track:1"])
+
+        XCTAssertEqual(callbackMissingScopes, [])
+        XCTAssertTrue(
+            SpotifyAPIScopePreflightURLProtocol.requestLog.contains { $0.httpMethod == "POST" && $0.url?.path == "/v1/playlists/playlist123/tracks" }
+        )
+    }
 }
 
 private final class SpotifyAPIScopePreflightURLProtocol: URLProtocol {

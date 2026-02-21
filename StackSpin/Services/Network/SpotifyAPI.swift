@@ -254,6 +254,12 @@ final class SpotifyAPI {
 
     private func preflightAddTracksScopeCheck(writeContext: PlaylistWriteContext) throws {
         let grantedScopes = authController.grantedScopes
+        if grantedScopes.isEmpty {
+            logger.error(
+                "Spotify addTracks preflight skipped playlistID=\(writeContext.playlistID, privacy: .public) reason=unknownGrantedScopes tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
+            )
+            return
+        }
         let missingScopes = writeContext.requiredWriteScopes.subtracting(grantedScopes)
         guard !missingScopes.isEmpty else { return }
 
