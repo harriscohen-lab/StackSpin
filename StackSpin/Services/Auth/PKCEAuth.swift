@@ -162,12 +162,14 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let payload = try await performTokenRequest(request, operation: "refresh")
+        let rotatedRefreshToken = payload.refreshToken?.isEmpty == false
+        let finalRefreshToken = rotatedRefreshToken ? payload.refreshToken! : tokens.refreshToken
         logger.debug(
-            "Spotify token refresh succeeded generationBefore=\(tokens.generation, privacy: .public) refreshTokenReturned=\(payload.refreshToken != nil, privacy: .public)"
+            "Spotify token refresh succeeded generationBefore=\(tokens.generation, privacy: .public) refreshTokenRotatedAndPersisted=\(rotatedRefreshToken, privacy: .public)"
         )
         let newTokens = SpotifyTokens(
             accessToken: payload.accessToken,
-            refreshToken: tokens.refreshToken,
+            refreshToken: finalRefreshToken,
             expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn)),
             generation: tokens.generation + 1
         )
