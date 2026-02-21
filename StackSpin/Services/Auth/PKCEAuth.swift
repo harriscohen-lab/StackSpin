@@ -11,12 +11,14 @@ struct SpotifyTokens: Codable {
     let refreshToken: String
     let expirationDate: Date
     let generation: Int
+    let grantedScopes: [String]
 
-    init(accessToken: String, refreshToken: String, expirationDate: Date, generation: Int = 0) {
+    init(accessToken: String, refreshToken: String, expirationDate: Date, generation: Int = 0, grantedScopes: [String] = []) {
         self.accessToken = accessToken
         self.refreshToken = refreshToken
         self.expirationDate = expirationDate
         self.generation = generation
+        self.grantedScopes = grantedScopes
     }
 
     enum CodingKeys: String, CodingKey {
@@ -24,6 +26,7 @@ struct SpotifyTokens: Codable {
         case refreshToken
         case expirationDate
         case generation
+        case grantedScopes
     }
 
     init(from decoder: Decoder) throws {
@@ -32,6 +35,7 @@ struct SpotifyTokens: Codable {
         refreshToken = try container.decode(String.self, forKey: .refreshToken)
         expirationDate = try container.decode(Date.self, forKey: .expirationDate)
         generation = try container.decodeIfPresent(Int.self, forKey: .generation) ?? 0
+        grantedScopes = try container.decodeIfPresent([String].self, forKey: .grantedScopes) ?? []
     }
 }
 
@@ -47,10 +51,23 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         category: "SpotifyAuth"
     )
     private let transientRetryDelayNanoseconds: UInt64 = 400_000_000
+    private let defaultSpotifyScopes = [
+        "playlist-modify-public",
+        "playlist-modify-private",
+        "playlist-read-private",
+        "playlist-read-collaborative"
+    ]
+    private var pendingScopeReconsent: Set<String> = []
+    private(set) var hasPromptedScopeReconsentThisSession = false
 
     var tokenDiagnostics: String {
         let generation = tokens?.generation ?? -1
-        return "source=\(tokenSource) generation=\(generation)"
+        let scopes = tokens?.grantedScopes.sorted().joined(separator: ",") ?? "<none>"
+        return "source=\(tokenSource) generation=\(generation) scopes=\(scopes)"
+    }
+
+    var grantedScopes: Set<String> {
+        Set(tokens?.grantedScopes ?? [])
     }
 
     override init() {
@@ -71,6 +88,12 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         let challenge = verifier.challenge
         let state = UUID().uuidString
 
+        let forcedScopeSet = Set(defaultSpotifyScopes).union(pendingScopeReconsent)
+        let shouldShowDialog = !pendingScopeReconsent.isEmpty
+        if shouldShowDialog {
+            hasPromptedScopeReconsentThisSession = true
+        }
+
         var components = URLComponents(string: "https://accounts.spotify.com/authorize")!
         components.queryItems = [
             URLQueryItem(name: "client_id", value: clientID),
@@ -78,7 +101,8 @@ final class SpotifyAuthController: NSObject, ObservableObject {
             URLQueryItem(name: "redirect_uri", value: redirectURI.absoluteString),
             URLQueryItem(name: "code_challenge_method", value: "S256"),
             URLQueryItem(name: "code_challenge", value: challenge),
-            URLQueryItem(name: "scope", value: "playlist-modify-public playlist-modify-private playlist-read-private playlist-read-collaborative"),
+            URLQueryItem(name: "scope", value: forcedScopeSet.sorted().joined(separator: " ")),
+            URLQueryItem(name: "show_dialog", value: shouldShowDialog ? "true" : "false"),
             URLQueryItem(name: "state", value: state)
         ]
 
@@ -162,16 +186,18 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let payload = try await performTokenRequest(request, operation: "refresh")
+        let grantedScopes = Self.mergeGrantedScopes(payloadScope: payload.scope, fallbackScopes: tokens.grantedScopes)
         let rotatedRefreshToken = payload.refreshToken?.isEmpty == false
         let finalRefreshToken = rotatedRefreshToken ? payload.refreshToken! : tokens.refreshToken
         logger.debug(
-            "Spotify token refresh succeeded generationBefore=\(tokens.generation, privacy: .public) refreshTokenRotatedAndPersisted=\(rotatedRefreshToken, privacy: .public)"
+            "Spotify token refresh succeeded generationBefore=\(tokens.generation, privacy: .public) refreshTokenRotatedAndPersisted=\(rotatedRefreshToken, privacy: .public) grantedScopes=\(grantedScopes.sorted().joined(separator: ","), privacy: .public)"
         )
         let newTokens = SpotifyTokens(
             accessToken: payload.accessToken,
             refreshToken: finalRefreshToken,
             expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn)),
-            generation: tokens.generation + 1
+            generation: tokens.generation + 1,
+            grantedScopes: grantedScopes.sorted()
         )
         keychain.write(newTokens, key: "spotifyTokens")
         await MainActor.run {
@@ -221,8 +247,12 @@ final class SpotifyAuthController: NSObject, ObservableObject {
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
         let payload = try await performTokenRequest(request, operation: "exchange")
+        let grantedScopes = Self.mergeGrantedScopes(
+            payloadScope: payload.scope,
+            fallbackScopes: self.tokens?.grantedScopes ?? defaultSpotifyScopes
+        )
         logger.debug(
-            "Spotify token exchange succeeded refreshTokenReturned=\(payload.refreshToken != nil, privacy: .public) previousTokenExists=\(self.tokens != nil, privacy: .public)"
+            "Spotify token exchange succeeded refreshTokenReturned=\(payload.refreshToken != nil, privacy: .public) previousTokenExists=\(self.tokens != nil, privacy: .public) grantedScopes=\(grantedScopes.sorted().joined(separator: ","), privacy: .public)"
         )
         if payload.refreshToken == nil, self.tokens?.refreshToken != nil {
             logger.error(
@@ -233,13 +263,25 @@ final class SpotifyAuthController: NSObject, ObservableObject {
             accessToken: payload.accessToken,
             refreshToken: payload.refreshToken ?? self.tokens?.refreshToken ?? "",
             expirationDate: Date().addingTimeInterval(TimeInterval(payload.expiresIn)),
-            generation: (self.tokens?.generation ?? -1) + 1
+            generation: (self.tokens?.generation ?? -1) + 1,
+            grantedScopes: grantedScopes.sorted()
         )
         keychain.write(tokens, key: "spotifyTokens")
         await MainActor.run {
             self.tokens = tokens
             self.tokenSource = "exchange"
+            self.pendingScopeReconsent.subtract(tokens.grantedScopes)
         }
+    }
+
+    func markScopeReconsentRequired(missingScopes: Set<String>) {
+        guard !missingScopes.isEmpty else { return }
+        pendingScopeReconsent.formUnion(missingScopes)
+    }
+
+    private static func mergeGrantedScopes(payloadScope: String?, fallbackScopes: [String]) -> Set<String> {
+        let parsedScopes = Set((payloadScope ?? "").split(separator: " ").map(String.init))
+        return parsedScopes.isEmpty ? Set(fallbackScopes) : parsedScopes
     }
 
     private func performTokenRequest(_ request: URLRequest, operation: String) async throws -> TokenResponse {
@@ -317,6 +359,21 @@ final class SpotifyAuthController: NSObject, ObservableObject {
     }
 }
 
+
+#if DEBUG
+extension SpotifyAuthController {
+    func debugInjectTokens(_ tokens: SpotifyTokens) {
+        self.tokens = tokens
+        self.tokenSource = "debug"
+    }
+
+    func debugResetPromptState() {
+        self.pendingScopeReconsent = []
+        self.hasPromptedScopeReconsentThisSession = false
+    }
+}
+#endif
+
 private extension SpotifyAuthController {
     func clearCachedTokens() async {
         keychain.delete(key: "spotifyTokens")
@@ -340,11 +397,13 @@ private struct TokenResponse: Decodable {
     let accessToken: String
     let refreshToken: String?
     let expiresIn: Int
+    let scope: String?
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
         case refreshToken = "refresh_token"
         case expiresIn = "expires_in"
+        case scope
     }
 }
 
