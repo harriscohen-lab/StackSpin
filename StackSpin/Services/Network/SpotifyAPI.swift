@@ -207,16 +207,64 @@ final class SpotifyAPI {
     func probePlaylistWriteAccess(playlistID: String) async throws -> PlaylistWriteProbeResult {
         guard let normalizedPlaylistID = AppSettings.normalizedPlaylistID(from: playlistID),
               !normalizedPlaylistID.isEmpty else {
-            return PlaylistWriteProbeResult(playlistID: playlistID, canWrite: false, details: "Playlist ID is invalid.")
+            return PlaylistWriteProbeResult(
+                playlistID: playlistID,
+                ownershipOrCollaborativeAccess: false,
+                missingWriteScopes: [],
+                hasRequiredWriteScopes: false,
+                details: "Playlist ID is invalid."
+            )
         }
 
         let token = try await authController.withValidToken()
-        let context = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+        let context = try await playlistWriteContext(playlistID: normalizedPlaylistID, token: token)
+        let hasOwnershipAccess = context.collaborative || context.ownershipMatches
+
+        guard hasOwnershipAccess else {
+            return PlaylistWriteProbeResult(
+                playlistID: context.playlistID,
+                ownershipOrCollaborativeAccess: false,
+                missingWriteScopes: [],
+                hasRequiredWriteScopes: false,
+                details: "Signed in as @\(context.signedInUserID), owner @\(context.ownerID), collaborative=\(context.collaborative). Playlist is not writable by this account."
+            )
+        }
+
+        let missingScopes = missingWriteScopes(writeContext: context)
+        if !missingScopes.isEmpty {
+            return PlaylistWriteProbeResult(
+                playlistID: context.playlistID,
+                ownershipOrCollaborativeAccess: true,
+                missingWriteScopes: missingScopes,
+                hasRequiredWriteScopes: false,
+                details: "Signed in as @\(context.signedInUserID), owner @\(context.ownerID), collaborative=\(context.collaborative). Missing required Spotify scope(s): \(missingScopes.sorted().joined(separator: ", ")). Reconnect Spotify and approve these permissions."
+            )
+        }
+
         return PlaylistWriteProbeResult(
             playlistID: context.playlistID,
-            canWrite: context.collaborative || context.ownershipMatches,
+            ownershipOrCollaborativeAccess: true,
+            missingWriteScopes: [],
+            hasRequiredWriteScopes: true,
             details: "Signed in as @\(context.signedInUserID), owner @\(context.ownerID), collaborative=\(context.collaborative)."
         )
+    }
+
+    private func playlistWriteContext(playlistID: String, token: String) async throws -> PlaylistWriteContext {
+        let profile = try await currentUserProfile(token: token)
+        let playlist = try await playlistMetadata(playlistID: playlistID, token: token)
+        let context = PlaylistWriteContext(
+            signedInUserID: profile.id,
+            playlistID: playlistID,
+            ownerID: playlist.owner.id,
+            collaborative: playlist.collaborative,
+            ownershipMatches: profile.id == playlist.owner.id,
+            isPublic: playlist.publicVisibility ?? false
+        )
+        logger.debug(
+            "Spotify playlist write validation playlistID=\(context.playlistID, privacy: .public) signedInUser=\(context.signedInUserID, privacy: .public) ownerID=\(context.ownerID, privacy: .public) collaborative=\(context.collaborative, privacy: .public) ownershipMatch=\(context.ownershipMatches, privacy: .public)"
+        )
+        return context
     }
 
     private func validatePlaylistWriteAccess(playlistID: String, token: String) async throws -> PlaylistWriteContext {
@@ -228,21 +276,9 @@ final class SpotifyAPI {
             )
         }
 
-        let profile = try await currentUserProfile(token: token)
-        let playlist = try await playlistMetadata(playlistID: normalizedPlaylistID, token: token)
-        let context = PlaylistWriteContext(
-            signedInUserID: profile.id,
-            playlistID: normalizedPlaylistID,
-            ownerID: playlist.owner.id,
-            collaborative: playlist.collaborative,
-            ownershipMatches: profile.id == playlist.owner.id,
-            isPublic: playlist.publicVisibility ?? false
-        )
-        logger.debug(
-            "Spotify playlist write validation playlistID=\(context.playlistID, privacy: .public) signedInUser=\(context.signedInUserID, privacy: .public) ownerID=\(context.ownerID, privacy: .public) collaborative=\(context.collaborative, privacy: .public) ownershipMatch=\(context.ownershipMatches, privacy: .public)"
-        )
+        let context = try await playlistWriteContext(playlistID: normalizedPlaylistID, token: token)
 
-        guard playlist.isWritable(byUserID: profile.id) else {
+        guard context.collaborative || context.ownershipMatches else {
             throw AppError.network(
                 "Spotify playlist is not writable by the current account. Signed in as @\(context.signedInUserID); playlist owned by @\(context.ownerID); collaborative=\(context.collaborative). Reconnect Spotify and reselect a writable playlist."
             )
@@ -260,7 +296,7 @@ final class SpotifyAPI {
             )
             return
         }
-        let missingScopes = writeContext.requiredWriteScopes.subtracting(grantedScopes)
+        let missingScopes = missingWriteScopes(writeContext: writeContext)
         guard !missingScopes.isEmpty else { return }
 
         authController.markScopeReconsentRequired(missingScopes: missingScopes)
@@ -273,6 +309,10 @@ final class SpotifyAPI {
         throw AppError.network(
             "Spotify write permission is missing required scope(s): \(scopeText). Reconnect Spotify to approve these permissions; StackSpin will force Spotify's consent dialog."
         )
+    }
+
+    private func missingWriteScopes(writeContext: PlaylistWriteContext) -> Set<String> {
+        writeContext.requiredWriteScopes.subtracting(authController.grantedScopes)
     }
 
     private func currentUserProfile(token: String) async throws -> SpotifyCurrentUser {
@@ -402,8 +442,14 @@ final class SpotifyAPI {
 
 struct PlaylistWriteProbeResult {
     let playlistID: String
-    let canWrite: Bool
+    let ownershipOrCollaborativeAccess: Bool
+    let missingWriteScopes: Set<String>
+    let hasRequiredWriteScopes: Bool
     let details: String
+
+    var canWrite: Bool {
+        ownershipOrCollaborativeAccess && hasRequiredWriteScopes
+    }
 }
 
 private struct PlaylistWriteContext {
