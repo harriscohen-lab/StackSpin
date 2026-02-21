@@ -10,14 +10,20 @@ private enum AddTracksForbiddenClassification: String {
 final class SpotifyAPI {
     private let authController: SpotifyAuthController
     private let session: URLSession
+    private let onMissingWriteScopes: ((Set<String>) -> Void)?
     private let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "StackSpin",
         category: "SpotifyAPI"
     )
 
-    init(authController: SpotifyAuthController, session: URLSession = .shared) {
+    init(
+        authController: SpotifyAuthController,
+        session: URLSession = .shared,
+        onMissingWriteScopes: ((Set<String>) -> Void)? = nil
+    ) {
         self.authController = authController
         self.session = session
+        self.onMissingWriteScopes = onMissingWriteScopes
     }
 
     func searchAlbum(artist: String, title: String, market: String) async throws -> SpotifyAlbum? {
@@ -121,8 +127,10 @@ final class SpotifyAPI {
         }
         var writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
         logger.debug(
-            "Spotify addTracks writeContext playlistID=\(writeContext.playlistID, privacy: .public) signedInUser=\(writeContext.signedInUserID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
+            "Spotify addTracks writeContext playlistID=\(writeContext.playlistID, privacy: .public) signedInUser=\(writeContext.signedInUserID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) public=\(writeContext.isPublic, privacy: .public) requiredScopes=\(writeContext.requiredWriteScopes.sorted().joined(separator: ","), privacy: .public) tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
         )
+
+        try preflightAddTracksScopeCheck(writeContext: writeContext)
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
@@ -161,7 +169,7 @@ final class SpotifyAPI {
                             collaborative: writeContext.collaborative
                         )
                         logger.error(
-                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) classification=\(classification.rawValue, privacy: .public) spotifyStatus=\(spotifyError?.status ?? -1, privacy: .public) spotifyMessage=\(spotifyError?.message ?? "<missing>", privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
+                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) classification=\(classification.rawValue, privacy: .public) spotifyStatus=\(spotifyError?.status ?? -1, privacy: .public) spotifyMessage=\(spotifyError?.message ?? "<missing>", privacy: .public) grantedScopes=\(self.authController.grantedScopes.sorted().joined(separator: ","), privacy: .public) requiredScopes=\(writeContext.requiredWriteScopes.sorted().joined(separator: ","), privacy: .public) reconsentPromptedThisSession=\(self.authController.hasPromptedScopeReconsentThisSession, privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
                         )
 
                         if !hasRetriedAfterRefresh {
@@ -169,6 +177,7 @@ final class SpotifyAPI {
                             do {
                                 token = try await authController.forceRefreshToken()
                                 writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+                                try preflightAddTracksScopeCheck(writeContext: writeContext)
                                 logger.debug(
                                     "Spotify addTracks retrying after forced refresh playlistID=\(normalizedPlaylistID, privacy: .public) tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
                                 )
@@ -226,7 +235,8 @@ final class SpotifyAPI {
             playlistID: normalizedPlaylistID,
             ownerID: playlist.owner.id,
             collaborative: playlist.collaborative,
-            ownershipMatches: profile.id == playlist.owner.id
+            ownershipMatches: profile.id == playlist.owner.id,
+            isPublic: playlist.publicVisibility ?? false
         )
         logger.debug(
             "Spotify playlist write validation playlistID=\(context.playlistID, privacy: .public) signedInUser=\(context.signedInUserID, privacy: .public) ownerID=\(context.ownerID, privacy: .public) collaborative=\(context.collaborative, privacy: .public) ownershipMatch=\(context.ownershipMatches, privacy: .public)"
@@ -239,6 +249,24 @@ final class SpotifyAPI {
         }
 
         return context
+    }
+
+
+    private func preflightAddTracksScopeCheck(writeContext: PlaylistWriteContext) throws {
+        let grantedScopes = authController.grantedScopes
+        let missingScopes = writeContext.requiredWriteScopes.subtracting(grantedScopes)
+        guard !missingScopes.isEmpty else { return }
+
+        authController.markScopeReconsentRequired(missingScopes: missingScopes)
+        onMissingWriteScopes?(missingScopes)
+        logger.error(
+            "Spotify addTracks blocked preflight playlistID=\(writeContext.playlistID, privacy: .public) public=\(writeContext.isPublic, privacy: .public) missingScopes=\(missingScopes.sorted().joined(separator: ","), privacy: .public) grantedScopes=\(grantedScopes.sorted().joined(separator: ","), privacy: .public) requiredScopes=\(writeContext.requiredWriteScopes.sorted().joined(separator: ","), privacy: .public)"
+        )
+
+        let scopeText = missingScopes.sorted().joined(separator: ", ")
+        throw AppError.network(
+            "Spotify write permission is missing required scope(s): \(scopeText). Reconnect Spotify to approve these permissions; StackSpin will force Spotify's consent dialog."
+        )
     }
 
     private func currentUserProfile(token: String) async throws -> SpotifyCurrentUser {
@@ -257,7 +285,7 @@ final class SpotifyAPI {
     private func playlistMetadata(playlistID: String, token: String) async throws -> SpotifyPlaylistMetadata {
         var components = URLComponents(string: "https://api.spotify.com/v1/playlists/\(playlistID)")!
         components.queryItems = [
-            URLQueryItem(name: "fields", value: "id,collaborative,owner(id)")
+            URLQueryItem(name: "fields", value: "id,collaborative,public,owner(id)")
         ]
         var request = URLRequest(url: components.url!)
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -378,6 +406,11 @@ private struct PlaylistWriteContext {
     let ownerID: String
     let collaborative: Bool
     let ownershipMatches: Bool
+    let isPublic: Bool
+
+    var requiredWriteScopes: Set<String> {
+        Set([isPublic ? "playlist-modify-public" : "playlist-modify-private"])
+    }
 }
 
 private struct SpotifyAPIErrorPayload: Decodable {
@@ -420,7 +453,15 @@ private struct SpotifyPlaylistMetadata: Decodable {
 
     let id: String
     let collaborative: Bool
+    let publicVisibility: Bool?
     let owner: Owner
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case collaborative
+        case publicVisibility = "public"
+        case owner
+    }
 
     func isWritable(byUserID userID: String) -> Bool {
         collaborative || owner.id == userID
