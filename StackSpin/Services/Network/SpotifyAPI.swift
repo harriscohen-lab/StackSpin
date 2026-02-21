@@ -193,6 +193,14 @@ final class SpotifyAPI {
                                 "Spotify add tracks failed (403 Forbidden). Signed in as @\(writeContext.signedInUserID); playlist owned by @\(writeContext.ownerID); collaborative=\(writeContext.collaborative). Reconnect Spotify and reselect a writable playlist."
                             )
                         case .permissionsOrScope, .unknownForbidden:
+                            let missingWriteScopes = missingWriteScopesForForbiddenAddTracks(
+                                writeContext: writeContext,
+                                response: http
+                            )
+                            if !missingWriteScopes.isEmpty {
+                                authController.markScopeReconsentRequired(missingScopes: missingWriteScopes)
+                                onMissingWriteScopes?(missingWriteScopes)
+                            }
                             throw AppError.spotifyPermissionsExpiredOrInsufficient
                         }
                     }
@@ -380,16 +388,66 @@ final class SpotifyAPI {
     }
 
     private static func logScopeHeaders(from response: HTTPURLResponse, logger: Logger, endpoint: String) {
-        let headers = response.allHeaderFields
-        let scope = headers.first { String(describing: $0.key).lowercased() == "scope" }?.value
-        let oauthScope = headers.first { String(describing: $0.key).lowercased() == "x-oauth-scopes" }?.value
-        let acceptedScope = headers.first { String(describing: $0.key).lowercased() == "x-accepted-oauth-scopes" }?.value
+        let parsedHeaders = parsedScopeHeaders(from: response)
+        let scope = parsedHeaders.scopeHeader.isEmpty ? nil : parsedHeaders.scopeHeader.sorted().joined(separator: " ")
+        let oauthScope = parsedHeaders.oauthScopeHeader.isEmpty ? nil : parsedHeaders.oauthScopeHeader.sorted().joined(separator: " ")
+        let acceptedScope = parsedHeaders.acceptedScopeHeader.isEmpty ? nil : parsedHeaders.acceptedScopeHeader.sorted().joined(separator: " ")
 
         if scope != nil || oauthScope != nil || acceptedScope != nil {
             logger.debug(
                 "Spotify response auth headers endpoint=\(endpoint, privacy: .public) scope=\(String(describing: scope ?? "<missing>"), privacy: .public) oauthScopes=\(String(describing: oauthScope ?? "<missing>"), privacy: .public) acceptedScopes=\(String(describing: acceptedScope ?? "<missing>"), privacy: .public)"
             )
         }
+    }
+
+    private func missingWriteScopesForForbiddenAddTracks(
+        writeContext: PlaylistWriteContext,
+        response: HTTPURLResponse
+    ) -> Set<String> {
+        let requiredWriteScopes = writeContext.requiredWriteScopes
+        let diagnosticsGrantedScopes = Self.scopesFromTokenDiagnostics(authController.tokenDiagnostics)
+        let knownGrantedScopes = authController.grantedScopes.union(diagnosticsGrantedScopes)
+        let headerScopes = Self.parsedScopeHeaders(from: response)
+
+        if headerScopes.hasAnyScopeHeaders {
+            let grantedFromHeaders = headerScopes.scopeHeader.union(headerScopes.oauthScopeHeader)
+            let requiredFromHeaders = headerScopes.acceptedScopeHeader.isEmpty
+                ? requiredWriteScopes
+                : requiredWriteScopes.intersection(headerScopes.acceptedScopeHeader)
+            let effectiveRequiredScopes = requiredFromHeaders.isEmpty ? requiredWriteScopes : requiredFromHeaders
+            let effectiveGrantedScopes = grantedFromHeaders.isEmpty ? knownGrantedScopes : grantedFromHeaders
+            return effectiveRequiredScopes.subtracting(effectiveGrantedScopes)
+        }
+
+        let missingFromDiagnostics = requiredWriteScopes.subtracting(knownGrantedScopes)
+        return missingFromDiagnostics.isEmpty ? requiredWriteScopes : missingFromDiagnostics
+    }
+
+    private static func parsedScopeHeaders(from response: HTTPURLResponse) -> ParsedScopeHeaders {
+        let headers = response.allHeaderFields
+        let scope = headers.first { String(describing: $0.key).lowercased() == "scope" }?.value
+        let oauthScope = headers.first { String(describing: $0.key).lowercased() == "x-oauth-scopes" }?.value
+        let acceptedScope = headers.first { String(describing: $0.key).lowercased() == "x-accepted-oauth-scopes" }?.value
+
+        return ParsedScopeHeaders(
+            scopeHeader: parseScopeSet(from: scope),
+            oauthScopeHeader: parseScopeSet(from: oauthScope),
+            acceptedScopeHeader: parseScopeSet(from: acceptedScope)
+        )
+    }
+
+    private static func parseScopeSet(from value: Any?) -> Set<String> {
+        guard let value else { return [] }
+        let scopeText = String(describing: value)
+        let separators = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: ","))
+        let rawScopes = scopeText.components(separatedBy: separators)
+        return Set(rawScopes.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty })
+    }
+
+    private static func scopesFromTokenDiagnostics(_ diagnostics: String) -> Set<String> {
+        guard let scopeRange = diagnostics.range(of: "scopes=") else { return [] }
+        let suffix = diagnostics[scopeRange.upperBound...]
+        return parseScopeSet(from: String(suffix))
     }
 
     private static func spotifyAPIError(from data: Data) -> SpotifyAPIErrorDetail? {
@@ -416,6 +474,16 @@ private struct PlaylistWriteContext {
 
     var requiredWriteScopes: Set<String> {
         Set([isPublic ? "playlist-modify-public" : "playlist-modify-private"])
+    }
+}
+
+private struct ParsedScopeHeaders {
+    let scopeHeader: Set<String>
+    let oauthScopeHeader: Set<String>
+    let acceptedScopeHeader: Set<String>
+
+    var hasAnyScopeHeaders: Bool {
+        !scopeHeader.isEmpty || !oauthScopeHeader.isEmpty || !acceptedScopeHeader.isEmpty
     }
 }
 
