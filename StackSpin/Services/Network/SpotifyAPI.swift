@@ -121,7 +121,7 @@ final class SpotifyAPI {
         }
         var writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
         logger.debug(
-            "Spotify addTracks writeContext playlistID=\(writeContext.playlistID, privacy: .public) signedInUser=\(writeContext.signedInUserID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) tokenDiagnostics=\(authController.tokenDiagnostics, privacy: .public)"
+            "Spotify addTracks writeContext playlistID=\(writeContext.playlistID, privacy: .public) signedInUser=\(writeContext.signedInUserID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
         )
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
@@ -170,7 +170,7 @@ final class SpotifyAPI {
                                 token = try await authController.forceRefreshToken()
                                 writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
                                 logger.debug(
-                                    "Spotify addTracks retrying after forced refresh playlistID=\(normalizedPlaylistID, privacy: .public) tokenDiagnostics=\(authController.tokenDiagnostics, privacy: .public)"
+                                    "Spotify addTracks retrying after forced refresh playlistID=\(normalizedPlaylistID, privacy: .public) tokenDiagnostics=\(self.authController.tokenDiagnostics, privacy: .public)"
                                 )
                                 continue
                             } catch {
