@@ -146,6 +146,63 @@ final class SpotifyAPIScopePreflightTests: XCTestCase {
         )
     }
 
+
+    func testForbiddenWithoutScopeHeadersPromptsReconsentForBothWriteScopes() async throws {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]
+        let session = URLSession(configuration: config)
+
+        let auth = SpotifyAuthController()
+        auth.debugInjectTokens(
+            SpotifyTokens(
+                accessToken: "access",
+                refreshToken: "refresh",
+                expirationDate: Date().addingTimeInterval(3600),
+                generation: 0,
+                grantedScopes: ["playlist-modify-public", "playlist-modify-private", "playlist-read-private"]
+            )
+        )
+
+        var callbackMissingScopes: Set<String> = []
+        SpotifyAPIScopePreflightURLProtocol.requestHandler = { request in
+            guard let url = request.url else {
+                throw URLError(.badURL)
+            }
+
+            switch (request.httpMethod ?? "GET", url.host ?? "", url.path) {
+            case ("GET", "api.spotify.com", "/v1/me"):
+                return (200, nil, Data(#"{"id":"owner123"}"#.utf8))
+            case ("GET", "api.spotify.com", "/v1/playlists/playlist123"):
+                return (200, nil, Data(#"{"id":"playlist123","collaborative":false,"public":true,"owner":{"id":"owner123"}}"#.utf8))
+            case ("POST", "api.spotify.com", "/v1/playlists/playlist123/tracks"):
+                return (403, nil, Data(#"{"error":{"status":403,"message":"Forbidden"}}"#.utf8))
+            case ("POST", "accounts.spotify.com", "/api/token"):
+                return (400, nil, Data(#"{"error":"invalid_grant"}"#.utf8))
+            default:
+                return (200, nil, Data(#"{"snapshot_id":"ignored"}"#.utf8))
+            }
+        }
+
+        let api = SpotifyAPI(
+            authController: auth,
+            session: session,
+            onMissingWriteScopes: { callbackMissingScopes = $0 }
+        )
+
+        do {
+            try await api.addTracks(playlistID: "playlist123", trackURIs: ["spotify:track:1"])
+            XCTFail("Expected permissions error after forbidden add-tracks POST")
+        } catch let appError as AppError {
+            guard case .spotifyPermissionsExpiredOrInsufficient = appError else {
+                XCTFail("Unexpected app error: \(appError)")
+                return
+            }
+        }
+
+        XCTAssertEqual(callbackMissingScopes, ["playlist-modify-private", "playlist-modify-public"])
+        XCTAssertEqual(auth.debugPendingScopeReconsentScopes(), ["playlist-modify-private", "playlist-modify-public"])
+    }
+
     func testForbiddenPostMarksReconsentForMissingWriteScopes() async throws {
         let config = URLSessionConfiguration.ephemeral
         config.protocolClasses = [SpotifyAPIScopePreflightURLProtocol.self]

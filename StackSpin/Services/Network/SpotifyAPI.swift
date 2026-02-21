@@ -445,6 +445,7 @@ final class SpotifyAPI {
         response: HTTPURLResponse
     ) -> Set<String> {
         let requiredWriteScopes = writeContext.requiredWriteScopes
+        let fallbackWriteScopes = writeContext.fallbackWriteScopesForForbidden
         let diagnosticsGrantedScopes = Self.scopesFromTokenDiagnostics(authController.tokenDiagnostics)
         let knownGrantedScopes = authController.grantedScopes.union(diagnosticsGrantedScopes)
         let headerScopes = Self.parsedScopeHeaders(from: response)
@@ -460,7 +461,7 @@ final class SpotifyAPI {
         }
 
         let missingFromDiagnostics = requiredWriteScopes.subtracting(knownGrantedScopes)
-        return missingFromDiagnostics.isEmpty ? requiredWriteScopes : missingFromDiagnostics
+        return missingFromDiagnostics.isEmpty ? fallbackWriteScopes : missingFromDiagnostics
     }
 
     private static func parsedScopeHeaders(from response: HTTPURLResponse) -> ParsedScopeHeaders {
@@ -511,6 +512,11 @@ struct PlaylistWriteProbeResult {
 }
 
 private struct PlaylistWriteContext {
+    private static let allWriteScopes: Set<String> = [
+        "playlist-modify-public",
+        "playlist-modify-private"
+    ]
+
     let signedInUserID: String
     let playlistID: String
     let ownerID: String
@@ -520,6 +526,10 @@ private struct PlaylistWriteContext {
 
     var requiredWriteScopes: Set<String> {
         Set([isPublic ? "playlist-modify-public" : "playlist-modify-private"])
+    }
+
+    var fallbackWriteScopesForForbidden: Set<String> {
+        Self.allWriteScopes
     }
 }
 
