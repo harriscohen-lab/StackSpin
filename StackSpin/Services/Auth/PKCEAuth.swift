@@ -371,6 +371,10 @@ extension SpotifyAuthController {
         self.pendingScopeReconsent = []
         self.hasPromptedScopeReconsentThisSession = false
     }
+
+    func debugPendingScopeReconsentScopes() -> Set<String> {
+        pendingScopeReconsent
+    }
 }
 #endif
 
