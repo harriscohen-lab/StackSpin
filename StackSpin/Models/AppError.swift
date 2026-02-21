@@ -4,6 +4,7 @@ enum AppError: LocalizedError, Identifiable {
     case spotifyAuth
     case spotifyAuthCancelled
     case spotifyAuthStateMismatch
+    case spotifyPermissionsExpiredOrInsufficient
     case network(String)
     case parsing
     case noPlaylist
@@ -19,6 +20,8 @@ enum AppError: LocalizedError, Identifiable {
             return "Spotify sign-in was cancelled."
         case .spotifyAuthStateMismatch:
             return "Spotify sign-in couldn’t be verified. Please try again."
+        case .spotifyPermissionsExpiredOrInsufficient:
+            return "Spotify permissions for playlist writes are missing or expired. Reconnect Spotify to refresh playlist write permissions."
         case .network(let message):
             return message
         case .parsing:

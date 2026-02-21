@@ -1,6 +1,12 @@
 import Foundation
 import os
 
+private enum AddTracksForbiddenClassification: String {
+    case ownershipMismatch = "ownership_mismatch"
+    case permissionsOrScope = "permissions_or_scope"
+    case unknownForbidden = "unknown_forbidden"
+}
+
 final class SpotifyAPI {
     private let authController: SpotifyAuthController
     private let session: URLSession
@@ -114,6 +120,9 @@ final class SpotifyAPI {
             throw AppError.network("Spotify add tracks token dependency failed: \(error.localizedDescription)")
         }
         var writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+        logger.debug(
+            "Spotify addTracks writeContext playlistID=\(writeContext.playlistID, privacy: .public) signedInUser=\(writeContext.signedInUserID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) tokenDiagnostics=\(authController.tokenDiagnostics, privacy: .public)"
+        )
 
         let chunks = stride(from: 0, to: trackURIs.count, by: 100).map {
             Array(trackURIs[$0..<min($0 + 100, trackURIs.count)])
@@ -129,6 +138,7 @@ final class SpotifyAPI {
                 request.httpBody = try JSONEncoder().encode(["uris": chunk])
 
                 let (data, http) = try await executeRequest(request, endpoint: "addTracks")
+                Self.logScopeHeaders(from: http, logger: logger, endpoint: "addTracks")
                 if http.statusCode == 429,
                    let retryAfter = http.value(forHTTPHeaderField: "Retry-After"),
                    let delay = Double(retryAfter) {
@@ -145,8 +155,13 @@ final class SpotifyAPI {
                     )
                     if http.statusCode == 403 {
                         let spotifyError = Self.spotifyAPIError(from: data)
+                        let classification = Self.classifyAddTracksForbidden(
+                            message: spotifyError?.message,
+                            ownershipMatch: writeContext.ownershipMatches,
+                            collaborative: writeContext.collaborative
+                        )
                         logger.error(
-                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) spotifyStatus=\(spotifyError?.status ?? -1, privacy: .public) spotifyMessage=\(spotifyError?.message ?? "<missing>", privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
+                            "Spotify addTracks forbidden signedInUser=\(writeContext.signedInUserID, privacy: .public) playlistID=\(writeContext.playlistID, privacy: .public) ownerID=\(writeContext.ownerID, privacy: .public) collaborative=\(writeContext.collaborative, privacy: .public) ownershipMatch=\(writeContext.ownershipMatches, privacy: .public) classification=\(classification.rawValue, privacy: .public) spotifyStatus=\(spotifyError?.status ?? -1, privacy: .public) spotifyMessage=\(spotifyError?.message ?? "<missing>", privacy: .public) bodySnippet=\(bodySnippet, privacy: .public)"
                         )
 
                         if !hasRetriedAfterRefresh {
@@ -154,21 +169,45 @@ final class SpotifyAPI {
                             do {
                                 token = try await authController.forceRefreshToken()
                                 writeContext = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+                                logger.debug(
+                                    "Spotify addTracks retrying after forced refresh playlistID=\(normalizedPlaylistID, privacy: .public) tokenDiagnostics=\(authController.tokenDiagnostics, privacy: .public)"
+                                )
                                 continue
                             } catch {
                                 logger.error("Spotify addTracks forced refresh failed playlistID=\(normalizedPlaylistID, privacy: .public) error=\(String(describing: error), privacy: .public)")
                             }
                         }
 
-                        throw AppError.network(
-                            "Spotify add tracks failed (403 Forbidden). Signed in as @\(writeContext.signedInUserID); playlist owned by @\(writeContext.ownerID); collaborative=\(writeContext.collaborative). Reconnect Spotify and reselect a writable playlist."
-                        )
+                        switch classification {
+                        case .ownershipMismatch:
+                            throw AppError.network(
+                                "Spotify add tracks failed (403 Forbidden). Signed in as @\(writeContext.signedInUserID); playlist owned by @\(writeContext.ownerID); collaborative=\(writeContext.collaborative). Reconnect Spotify and reselect a writable playlist."
+                            )
+                        case .permissionsOrScope, .unknownForbidden:
+                            throw AppError.spotifyPermissionsExpiredOrInsufficient
+                        }
                     }
                     throw AppError.network("Spotify add tracks failed")
                 }
                 success = true
             }
         }
+    }
+
+
+    func probePlaylistWriteAccess(playlistID: String) async throws -> PlaylistWriteProbeResult {
+        guard let normalizedPlaylistID = AppSettings.normalizedPlaylistID(from: playlistID),
+              !normalizedPlaylistID.isEmpty else {
+            return PlaylistWriteProbeResult(playlistID: playlistID, canWrite: false, details: "Playlist ID is invalid.")
+        }
+
+        let token = try await authController.withValidToken()
+        let context = try await validatePlaylistWriteAccess(playlistID: normalizedPlaylistID, token: token)
+        return PlaylistWriteProbeResult(
+            playlistID: context.playlistID,
+            canWrite: context.collaborative || context.ownershipMatches,
+            details: "Signed in as @\(context.signedInUserID), owner @\(context.ownerID), collaborative=\(context.collaborative)."
+        )
     }
 
     private func validatePlaylistWriteAccess(playlistID: String, token: String) async throws -> PlaylistWriteContext {
@@ -186,7 +225,11 @@ final class SpotifyAPI {
             signedInUserID: profile.id,
             playlistID: normalizedPlaylistID,
             ownerID: playlist.owner.id,
-            collaborative: playlist.collaborative
+            collaborative: playlist.collaborative,
+            ownershipMatches: profile.id == playlist.owner.id
+        )
+        logger.debug(
+            "Spotify playlist write validation playlistID=\(context.playlistID, privacy: .public) signedInUser=\(context.signedInUserID, privacy: .public) ownerID=\(context.ownerID, privacy: .public) collaborative=\(context.collaborative, privacy: .public) ownershipMatch=\(context.ownershipMatches, privacy: .public)"
         )
 
         guard playlist.isWritable(byUserID: profile.id) else {
@@ -285,6 +328,36 @@ final class SpotifyAPI {
         return String(value.prefix(maxCharacters))
     }
 
+
+    private static func classifyAddTracksForbidden(message: String?, ownershipMatch: Bool, collaborative: Bool) -> AddTracksForbiddenClassification {
+        guard ownershipMatch || collaborative else {
+            return .ownershipMismatch
+        }
+
+        let normalizedMessage = (message ?? "").lowercased()
+        if normalizedMessage.contains("insufficient") ||
+            normalizedMessage.contains("scope") ||
+            normalizedMessage.contains("permission") ||
+            normalizedMessage.contains("forbidden") {
+            return .permissionsOrScope
+        }
+
+        return .unknownForbidden
+    }
+
+    private static func logScopeHeaders(from response: HTTPURLResponse, logger: Logger, endpoint: String) {
+        let headers = response.allHeaderFields
+        let scope = headers.first { String(describing: $0.key).lowercased() == "scope" }?.value
+        let oauthScope = headers.first { String(describing: $0.key).lowercased() == "x-oauth-scopes" }?.value
+        let acceptedScope = headers.first { String(describing: $0.key).lowercased() == "x-accepted-oauth-scopes" }?.value
+
+        if scope != nil || oauthScope != nil || acceptedScope != nil {
+            logger.debug(
+                "Spotify response auth headers endpoint=\(endpoint, privacy: .public) scope=\(String(describing: scope ?? "<missing>"), privacy: .public) oauthScopes=\(String(describing: oauthScope ?? "<missing>"), privacy: .public) acceptedScopes=\(String(describing: acceptedScope ?? "<missing>"), privacy: .public)"
+            )
+        }
+    }
+
     private static func spotifyAPIError(from data: Data) -> SpotifyAPIErrorDetail? {
         guard let payload = try? JSONDecoder().decode(SpotifyAPIErrorPayload.self, from: data) else {
             return nil
@@ -293,11 +366,18 @@ final class SpotifyAPI {
     }
 }
 
+struct PlaylistWriteProbeResult {
+    let playlistID: String
+    let canWrite: Bool
+    let details: String
+}
+
 private struct PlaylistWriteContext {
     let signedInUserID: String
     let playlistID: String
     let ownerID: String
     let collaborative: Bool
+    let ownershipMatches: Bool
 }
 
 private struct SpotifyAPIErrorPayload: Decodable {
